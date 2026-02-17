@@ -1,0 +1,38 @@
+{"level":"info","message":"POST /api/analyze 400 4ms","timestamp":"2026-02-08T22:21:39.121Z"}
+{"level":"info","message":"POST /api/analyze 400 0ms","timestamp":"2026-02-08T22:21:39.124Z"}
+{"level":"info","message":"POST /api/analyze 200 0ms","timestamp":"2026-02-08T22:21:39.126Z"}
+{"level":"info","message":"POST /api/analyze 200 1ms","timestamp":"2026-02-08T22:21:39.129Z"}
+{"level":"info","message":"POST /api/analyze 200 1ms","timestamp":"2026-02-08T22:21:39.131Z"}
+{"level":"info","message":"POST /api/plan 400 0ms","timestamp":"2026-02-08T22:21:39.133Z"}
+{"level":"info","message":"POST /api/plan 200 1ms","timestamp":"2026-02-08T22:21:39.135Z"}
+{"level":"info","message":"POST /api/plan 200 1ms","timestamp":"2026-02-08T22:21:39.138Z"}
+{"level":"info","message":"POST /api/plan 200 1ms","timestamp":"2026-02-08T22:21:39.140Z"}
+{"level":"info","message":"POST /api/plan 200 0ms","timestamp":"2026-02-08T22:21:39.141Z"}
+{"level":"info","message":"GET /download/..%2Fetc 400 0ms","timestamp":"2026-02-08T22:21:39.142Z"}
+{"level":"info","message":"GET /download/nonexistent-project-99999 404 0ms","timestamp":"2026-02-08T22:21:39.143Z"}
+{"level":"info","message":"GET /download/test-download-1770589299144 200 7ms","timestamp":"2026-02-08T22:21:39.152Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-08T22:41:30.283Z"}
+{"level":"error","message":"Failed to initialize model on startup ANTHROPIC_API_KEY is missing in environment variables.","stack":"Error: ANTHROPIC_API_KEY is missing in environment variables.\n    at initializeModel (file:///Users/rakeshpatel/Desktop/AI%20Project%20generator/backend/src/services/llm.js:345:15)\n    at Server.<anonymous> (file:///Users/rakeshpatel/Desktop/AI%20Project%20generator/backend/src/index.js:317:19)\n    at Object.onceWrapper (node:events:633:28)\n    at Server.emit (node:events:531:35)\n    at emitListeningNT (node:net:1983:10)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)","timestamp":"2026-02-08T22:41:30.285Z"}
+{"level":"info","message":"Client connected: i9eEQHp66AZ6zggHAAAB","timestamp":"2026-02-08T22:41:34.863Z"}
+{"level":"info","message":"Client disconnected: i9eEQHp66AZ6zggHAAAB","timestamp":"2026-02-08T22:41:40.838Z"}
+{"level":"info","message":"Client connected: _kbyxRdx9jSCTo60AAAD","timestamp":"2026-02-08T22:41:50.880Z"}
+{"level":"info","message":"Client disconnected: _kbyxRdx9jSCTo60AAAD","timestamp":"2026-02-08T22:41:52.610Z"}
+{"level":"info","message":"Client connected: 5tmdaQHHmhsDKTIbAAAF","timestamp":"2026-02-08T22:41:53.491Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T22:45:01.643Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T22:45:01.646Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T22:45:09.305Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T22:45:09.306Z"}
+{"level":"error","message":"Forced shutdown after timeout","timestamp":"2026-02-08T22:45:11.647Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-08T22:45:56.665Z"}
+{"level":"info","message":"Client connected: W8VRtzOkYJMr42jAAAAB","timestamp":"2026-02-08T22:46:00.879Z"}
+{"level":"info","message":"Client connected: oMwRNsRnEFGe142qAAAD","timestamp":"2026-02-08T22:46:52.323Z"}
+{"level":"info","message":"Client connected: eA0oVAX7SbE7rghAAAAF","timestamp":"2026-02-08T22:47:07.859Z"}
+{"level":"info","message":"Client disconnected: eA0oVAX7SbE7rghAAAAF","timestamp":"2026-02-08T22:47:42.108Z"}
+{"level":"info","message":"Client disconnected: W8VRtzOkYJMr42jAAAAB","timestamp":"2026-02-08T22:47:42.110Z"}
+{"level":"info","message":"Client disconnected: oMwRNsRnEFGe142qAAAD","timestamp":"2026-02-08T22:47:42.110Z"}
+{"level":"info","message":"Client connected: T7G9nD4IA3pdNpKRAAAH","timestamp":"2026-02-08T22:47:50.291Z"}
+{"level":"info","message":"Client connected: HdyO1odDIOgp9NMeAAAJ","timestamp":"2026-02-08T22:47:50.862Z"}
+{"level":"info","message":"Client disconnected: HdyO1odDIOgp9NMeAAAJ","timestamp":"2026-02-08T22:47:53.086Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T22:49:58.129Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T22:49:58.131Z"}
+{"level":"info","message":"Client disconnected: T7G9nD4IA3pdNpKRAAAH","timestamp":"2026-02-08T22:50:02.309Z"}

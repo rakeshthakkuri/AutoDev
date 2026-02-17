@@ -1,6 +1,6 @@
-# AI Code Generator (Lovable Clone)
+# AI Code Generator
 
-A full-stack AI-powered code generator that creates web projects from natural language descriptions using CodeLlama.
+A full-stack AI-powered code generator that creates web projects from natural language descriptions using Claude (Anthropic).
 
 ## Features
 
@@ -10,35 +10,53 @@ A full-stack AI-powered code generator that creates web projects from natural la
 - 📁 File tree navigation
 - 💾 Download projects as ZIP files
 - 🎨 Modern, responsive UI
+- 🤖 Powered by Claude 3.5 Sonnet (via Anthropic API)
+
+## System Flow
+
+1. **Analysis Phase** (`POST /api/analyze`)
+   - The user's prompt is sent to the backend.
+   - Claude analyzes the request to determine project type, required framework, and key features.
+
+2. **Planning Phase** (`POST /api/plan`)
+   - Based on the analysis, Claude creates a detailed file structure and implementation plan.
+   - It identifies necessary files (HTML, CSS, JS, or React components).
+
+3. **Generation Phase** (Socket.IO)
+   - The frontend initiates a real-time connection.
+   - The backend generates code for each file sequentially using Claude.
+   - Each file is validated and "cleaned" to remove markdown artifacts or system prompts.
+   - Generated files are streamed back to the frontend immediately.
+
+4. **Live Preview**
+   - The frontend receives the code and builds a virtual file system.
+   - An in-browser bundler renders the application in real-time.
 
 ## Prerequisites
 
-- Python 3.8+
-- Node.js 18+
-- CodeLlama model file (`codellama-7b-instruct.Q4_K_M.gguf`)
+- Node.js 22+ (Required for `--watch` flag)
+- Anthropic API Key
 
 ## Setup
 
-### 1. Install Model
+### 1. Backend Setup
 
-Place your CodeLlama model file in the `models/` directory:
-```bash
-mv ~/Downloads/codellama-7b-instruct.Q4_K_M.gguf ./models/
-```
-
-### 2. Backend Setup
+The backend is built with Node.js and Express, utilizing `@anthropic-ai/sdk`.
 
 ```bash
 cd backend
 
-# Install Python dependencies
-pip3 install -r requirements.txt
+# Install dependencies
+npm install
 
-# For M2 Mac with Metal support:
-CMAKE_ARGS="-DLLAMA_METAL=on" pip3 install llama-cpp-python --force-reinstall --no-cache-dir
+# Setup Environment Variables
+cp .env.example .env
+# Open .env and add your ANTHROPIC_API_KEY
 ```
 
-### 3. Frontend Setup
+### 2. Frontend Setup
+
+The frontend is a React application built with Vite.
 
 ```bash
 cd frontend
@@ -52,99 +70,50 @@ npm run dev
 
 ## Running the Application
 
-### Start Backend
+1. **Start the Backend:**
+   In one terminal:
+   ```bash
+   cd backend
+   npm run dev
+   ```
+   The backend will start on `http://localhost:5001`.
 
-```bash
-cd backend
-python3 app.py
-```
+2. **Start the Frontend:**
+   In another terminal:
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+   The frontend will start on `http://localhost:5173`.
 
-The backend will start on `http://localhost:5001`
-
-### Start Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-The frontend will start on `http://localhost:5173`
-
-## Usage
-
-1. Open `http://localhost:5173` in your browser
-2. Enter a project description in the prompt box
-3. Click "Generate Project"
-4. Watch as files are generated in real-time
-5. View code in the editor and preview in the right panel
-6. Download the project as a ZIP file when complete
-
-## Example Prompts
-
-- "Create a landing page for a SaaS product with hero section, features, and pricing"
-- "Build a todo app with add, delete, and mark complete functionality"
-- "Make a portfolio website with projects gallery and contact form"
-- "Create a landing page for a coffee shop with menu and contact form"
-- "Build a simple calculator with basic operations"
+3. **Usage:**
+   - Open `http://localhost:5173` in your browser.
+   - Enter a project description (e.g., "Create a todo app").
+   - Click "Generate" and watch the AI build your project in real-time.
 
 ## Project Structure
 
 ```
-lovable-clone/
+ai-project-generator/
 ├── backend/
-│   ├── app.py              # Flask backend with CodeLlama integration
-│   ├── requirements.txt    # Python dependencies
-│   └── src/                # Additional backend modules
+│   ├── src/
+│   │   ├── services/
+│   │   │   ├── llm.js        # Anthropic integration & prompt engineering
+│   │   │   ├── templates.js  # React project templates
+│   │   │   ├── validator.js  # Code validation & auto-fixing
+│   │   │   ├── analysis.js   # Requirement analysis
+│   │   │   └── projectGeneration.js # Orchestration
+│   │   └── index.js          # Express server & socket.io logic
+│   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── components/     # React components
-│   │   ├── store/          # State management
-│   │   └── App.tsx         # Main app component
-│   └── package.json        # Frontend dependencies
-├── models/                 # CodeLlama model files
-└── generated/              # Generated projects (created at runtime)
+│   │   ├── components/       # React components (FileTree, LivePreview, etc.)
+│   │   └── services/         # Frontend services
+│   └── package.json
 ```
 
-## Optimization Tips
+## Technologies
 
-### If RAM usage is high:
-
-1. Reduce `n_ctx` to 1024 in `backend/app.py`
-2. Reduce `n_batch` to 256
-3. Reduce `n_gpu_layers` to 20
-4. Use Q3 or Q2 quantized model
-
-### Monitor RAM Usage
-
-```bash
-top -pid $(pgrep -f "python3 app.py")
-```
-
-## Troubleshooting
-
-### Model not loading
-- Ensure the model file is in `./models/` directory
-- Check file path in `app.py` matches your model filename
-
-### WebSocket connection issues
-- Ensure backend is running on port 5001
-- Check CORS settings in `app.py`
-
-### Frontend build errors
-- Run `npm install` in the frontend directory
-- Clear `node_modules` and reinstall if needed
-
-## Next Steps
-
-- [ ] Add download button for ZIP files
-- [ ] Add project history/save feature
-- [ ] Add code editing in Monaco editor
-- [ ] Add deployment to Vercel/Netlify
-- [ ] Add chat interface for iterative improvements
-- [ ] Add more templates and examples
-- [ ] Add syntax highlighting in preview
-- [ ] Add error handling and validation
-
-## License
-
-MIT
+- **Frontend:** React, TypeScript, Vite, Tailwind CSS, Lucide React
+- **Backend:** Node.js, Express, Socket.IO
+- **AI:** Anthropic Claude 3.5 Sonnet

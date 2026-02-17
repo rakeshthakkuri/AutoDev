@@ -16,24 +16,49 @@ interface FileTreeProps {
 }
 
 export default function FileTree({ files, onFileClick, activeFile, validationResults = {}, editedFiles = {} }: FileTreeProps) {
+  // Safety check
+  if (!files || typeof files !== 'object') {
+    return (
+      <div className="file-tree">
+        <h3>📁 Project Files</h3>
+        <div className="files">
+          <p style={{ padding: '1rem', color: '#888' }}>No files available</p>
+        </div>
+      </div>
+    );
+  }
+
   const getFileStatus = (path: string) => {
-    const validation = validationResults[path];
+    const validation = validationResults?.[path];
     if (!validation) return null;
     
-    if (!validation.is_valid && validation.errors.length > 0) {
+    if (!validation.is_valid && validation.errors?.length > 0) {
       return 'error';
     }
-    if (validation.warnings.length > 0 || validation.fixes_applied.length > 0) {
+    if (validation.warnings?.length > 0 || validation.fixes_applied?.length > 0) {
       return 'warning';
     }
     return 'valid';
   };
 
+  const fileKeys = Object.keys(files);
+  
+  if (fileKeys.length === 0) {
+    return (
+      <div className="file-tree">
+        <h3>📁 Project Files</h3>
+        <div className="files">
+          <p style={{ padding: '1rem', color: '#888' }}>No files yet</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="file-tree">
       <h3>📁 Project Files</h3>
       <div className="files">
-        {Object.keys(files).map(path => {
+        {fileKeys.map(path => {
           const status = getFileStatus(path);
           const validation = validationResults[path];
           
@@ -43,7 +68,7 @@ export default function FileTree({ files, onFileClick, activeFile, validationRes
               className={`file-item ${activeFile === path ? 'active' : ''} ${status ? `status-${status}` : ''}`}
               onClick={() => onFileClick(path)}
               title={validation ? 
-                `Valid: ${validation.is_valid}, Errors: ${validation.errors.length}, Warnings: ${validation.warnings.length}` : 
+                `Valid: ${validation.is_valid}, Errors: ${validation.errors?.length || 0}, Warnings: ${validation.warnings?.length || 0}` : 
                 undefined
               }
             >
@@ -52,10 +77,10 @@ export default function FileTree({ files, onFileClick, activeFile, validationRes
               {status === 'warning' && <AlertCircle size={14} className="status-icon warning-icon" />}
               <File size={16} />
               <span>
-                {path}
-                {path in editedFiles && <span className="dirty-indicator" title="Modified"> *</span>}
+                {path || 'Untitled'}
+                {editedFiles && path in editedFiles && <span className="dirty-indicator" title="Modified"> *</span>}
               </span>
-              {validation?.fixes_applied.length > 0 && (
+              {validation?.fixes_applied && validation.fixes_applied.length > 0 && (
                 <span className="fix-badge" title={`Auto-fixed: ${validation.fixes_applied.join(', ')}`}>
                   🔧
                 </span>

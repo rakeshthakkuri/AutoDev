@@ -1,9 +1,16 @@
 import { useState } from 'react';
-import { Sparkles, Code, Zap, Rocket, ArrowRight, Github, Star } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Sparkles, Code, Zap, Rocket, ArrowRight, Github, Star, History } from 'lucide-react';
 import PromptInput from './PromptInput';
+import ErrorBoundary from './ErrorBoundary';
+import ProjectHistorySidebar from './ProjectHistorySidebar';
+import { GenerationStore } from '../store/generation';
+import { loadProject, ProjectData } from '../services/storage';
 
 export default function LandingPage() {
-  const [showPrompt, setShowPrompt] = useState(false);
+  const navigate = useNavigate();
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const { generateProject, hasUnsavedChanges, loadProject: loadProjectState } = GenerationStore();
 
   const features = [
     {
@@ -31,16 +38,56 @@ export default function LandingPage() {
   ];
 
   const handleGetStarted = () => {
-    setShowPrompt(true);
-    // Scroll to prompt input
-    setTimeout(() => {
-      const promptElement = document.querySelector('.prompt-input');
-      promptElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 100);
+    // Navigate directly to generation page
+    navigate('/generate');
+  };
+
+  const handleGenerate = async (prompt: string) => {
+    await generateProject(prompt);
+    // Navigate to generation page after starting generation
+    navigate('/generate');
+  };
+
+  const handleLoadProject = (project: ProjectData) => {
+    if (hasUnsavedChanges()) {
+      const confirmed = window.confirm(
+        'You have unsaved changes. Loading a project will discard them. Continue?'
+      );
+      if (!confirmed) return;
+    }
+
+    loadProjectState(project.files, project.editedFiles, project.prompt);
+    navigate('/generate');
   };
 
   return (
-    <div className="landing-page">
+    <div className="app">
+      <header className="header-modern">
+        <div className="header-content">
+          <div className="header-logo">
+            <Sparkles size={24} />
+            <span>AI Code Generator</span>
+          </div>
+          <div className="header-actions">
+            <button 
+              onClick={() => setIsHistoryOpen(true)} 
+              className="btn-header-modern"
+              title="Project History"
+            >
+              <History size={18} />
+              History
+            </button>
+          </div>
+        </div>
+      </header>
+      
+      <ProjectHistorySidebar
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        onLoadProject={handleLoadProject}
+      />
+      
+      <div className="landing-page">
       <div className="landing-hero">
         <div className="hero-background">
           <div className="gradient-orb orb-1"></div>
@@ -93,14 +140,6 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {showPrompt && (
-        <div className="landing-prompt-section">
-          <div className="prompt-container">
-            <h2>What would you like to build?</h2>
-            <PromptInput />
-          </div>
-        </div>
-      )}
 
       <div className="landing-features">
         <h2 className="section-title">Why Choose AI Code Generator?</h2>
@@ -123,14 +162,8 @@ export default function LandingPage() {
               key={index} 
               className="example-card"
               onClick={() => {
-                setShowPrompt(true);
-                setTimeout(() => {
-                  const textarea = document.querySelector('.prompt-input textarea') as HTMLTextAreaElement;
-                  if (textarea) {
-                    textarea.value = example;
-                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                  }
-                }, 100);
+                // Navigate to generation page with example as URL parameter
+                navigate(`/generate?prompt=${encodeURIComponent(example)}`);
               }}
             >
               <div className="example-icon">
@@ -151,6 +184,7 @@ export default function LandingPage() {
           <a href="#">Privacy</a>
         </div>
       </div>
+    </div>
     </div>
   );
 }

@@ -145,24 +145,61 @@ export const GenerationStore = create<GenerationState>((set, get) => {
       });
 
       try {
+        // Check backend health first
+        try {
+          await axios.get(`${API_URL}/health`, { timeout: 5000 });
+        } catch (healthError: any) {
+          console.error('Backend health check failed:', healthError);
+          throw new Error('Backend server is not responding. Please ensure the server is running on port 5001.');
+        }
+
         // Step 1: Analyze
-        const analyzeRes = await axios.post(`${API_URL}/api/analyze`, { prompt });
+        const analyzeRes = await axios.post(
+          `${API_URL}/api/analyze`, 
+          { prompt },
+          { timeout: 60000 } // 60 second timeout
+        );
         const requirements = analyzeRes.data;
 
         // Step 2: Plan
-        const planRes = await axios.post(`${API_URL}/api/plan`, { requirements });
+        const planRes = await axios.post(
+          `${API_URL}/api/plan`, 
+          { requirements },
+          { timeout: 60000 } // 60 second timeout
+        );
         const plan = planRes.data;
 
         // Step 3: Generate via WebSocket
         socket.emit('generate_project', { prompt, requirements, plan });
       } catch (error: any) {
         console.error('Generation error:', error);
+        
+        let errorMessage = 'Failed to start generation.';
+        let errorCode = 'NETWORK_ERROR';
+        
+        if (error?.code === 'ERR_NETWORK' || error?.message?.includes('Network Error')) {
+          errorMessage = 'Cannot connect to backend server. Please ensure the server is running on http://localhost:5001';
+          errorCode = 'NETWORK_ERROR';
+        } else if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
+          errorMessage = 'Request timed out. The backend server may be overloaded or unresponsive.';
+          errorCode = 'TIMEOUT_ERROR';
+        } else if (error?.response?.data?.error) {
+          errorMessage = error.response.data.error.message || errorMessage;
+          errorCode = error.response.data.error.code || errorCode;
+        } else if (error?.message) {
+          errorMessage = error.message;
+        }
+        
         set({ 
           isGenerating: false,
           error: {
-            code: error.response?.data?.error?.code || 'NETWORK_ERROR',
-            message: error.response?.data?.error?.message || error.message || 'Failed to start generation',
-            details: error.response?.data?.error?.details || {}
+            code: errorCode,
+            message: errorMessage,
+            details: error?.response?.data?.error?.details || { 
+              originalError: String(error),
+              url: error?.config?.url,
+              method: error?.config?.method
+            }
           }
         });
       }

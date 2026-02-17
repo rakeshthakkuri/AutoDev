@@ -26,8 +26,22 @@ export default function ErrorDisplay({ error, onRetry, onDismiss }: ErrorDisplay
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const getSuggestions = (code: string) => {
+  const getSuggestions = (code?: string) => {
+    if (!code) {
+      return [
+        'Check if the backend server is running on port 5001',
+        'Verify your network connection',
+        'Check browser console for more details'
+      ];
+    }
+    
     switch (code) {
+      case 'NETWORK_ERROR':
+        return [
+          'Ensure the backend server is running: `cd backend && python app.py`',
+          'Check if the server is accessible at http://localhost:5001',
+          'Verify CORS settings if accessing from a different origin'
+        ];
       case 'MODEL_LOAD_ERROR':
         return [
           'Check if the model file exists in the models/ directory',

@@ -1,14 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Wand2 } from 'lucide-react';
 import { GenerationStore } from '../store/generation';
 
 interface PromptInputProps {
   onGenerate?: (prompt: string) => void;
+  initialValue?: string;
 }
 
-export default function PromptInput({ onGenerate }: PromptInputProps) {
-  const [prompt, setPrompt] = useState('');
+export default function PromptInput({ onGenerate, initialValue = '' }: PromptInputProps) {
+  const [prompt, setPrompt] = useState(initialValue);
   const { generateProject, isGenerating } = GenerationStore();
+  
+  // Update prompt when initialValue changes
+  useEffect(() => {
+    if (initialValue && !prompt) {
+      setPrompt(initialValue);
+    }
+  }, [initialValue]);
 
   const handleGenerate = () => {
     if (prompt.trim() && !isGenerating) {

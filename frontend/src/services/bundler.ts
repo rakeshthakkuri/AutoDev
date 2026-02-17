@@ -365,7 +365,7 @@ export function bundleSvelteProject(files: Record<string, string>): BundledProje
  * Bundle plain HTML project
  */
 export function bundleHTMLProject(files: Record<string, string>): BundledProject {
-  const htmlFile = files['index.html'] || Object.keys(files).find(path => path.endsWith('.html')) || '';
+  const htmlFile = 'index.html' in files ? 'index.html' : Object.keys(files).find(path => path.endsWith('.html')) || '';
   const cssFiles = Object.entries(files).filter(([path]) => path.endsWith('.css'));
   const jsFiles = Object.entries(files).filter(([path]) => 
     path.endsWith('.js') && !path.endsWith('.jsx')

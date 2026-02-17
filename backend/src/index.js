@@ -1,4 +1,3 @@
-
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
@@ -7,12 +6,15 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import winston from 'winston';
+import archiver from 'archiver';
+import helmet from 'helmet';
+import compression from 'compression';
+import rateLimit from 'express-rate-limit';
 
 // Services
-import { initializeModel, generateCompletion, ANALYZER_PROMPT, PLANNER_PROMPT, CODE_GENERATOR_PROMPT } from './services/llm.js';
-import { CodeValidator } from './services/validator.js';
-import { getTemplate } from './services/templates.js';
-import { RetryHandler } from './services/retry.js';
+import { initializeModel } from './services/llm.js';
+import { AnalysisService } from './services/analysis.js';
+import { ProjectGenerationService } from './services/projectGeneration.js';
 
 // Setup paths
 const __filename = fileURLToPath(import.meta.url);
@@ -21,319 +23,302 @@ const PROJECT_ROOT = path.join(__dirname, '../..');
 const GENERATED_DIR = path.join(PROJECT_ROOT, 'generated');
 const LOG_DIR = path.join(__dirname, '../logs');
 
-// Ensure directories exist
 if (!fs.existsSync(GENERATED_DIR)) fs.mkdirSync(GENERATED_DIR, { recursive: true });
 if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
-// Setup Logging
+// ─── Logging ─────────────────────────────────────────────────────────────────
+
 const logger = winston.createLogger({
-    level: 'info',
-    format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.json()
-    ),
+    level: process.env.LOG_LEVEL || 'info',
+    format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
     transports: [
-        new winston.transports.File({ filename: path.join(LOG_DIR, 'error.log'), level: 'error' }),
-        new winston.transports.File({ filename: path.join(LOG_DIR, 'app.log') }),
-        new winston.transports.Console({
-            format: winston.format.combine(
-                winston.format.colorize(),
-                winston.format.simple()
-            )
-        })
+        new winston.transports.File({ filename: path.join(LOG_DIR, 'error.log'), level: 'error', maxsize: 5242880, maxFiles: 3 }),
+        new winston.transports.File({ filename: path.join(LOG_DIR, 'app.log'), maxsize: 5242880, maxFiles: 5 }),
+        new winston.transports.Console({ format: winston.format.combine(winston.format.colorize(), winston.format.simple()) })
     ]
 });
 
-// Initialize App
+// ─── Initialize Express App ──────────────────────────────────────────────────
+
 const app = express();
 const server = http.createServer(app);
+
+const CORS_ORIGINS = process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',')
+    : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'];
+
 const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
+    cors: { origin: process.env.NODE_ENV === 'production' ? CORS_ORIGINS : '*', methods: ['GET', 'POST'] },
+    maxHttpBufferSize: 10e6,
+    pingTimeout: 120000,
+    pingInterval: 25000
 });
 
-app.use(cors());
-app.use(express.json());
+// ─── Middleware ───────────────────────────────────────────────────────────────
 
-// Services Instances
-const validator = new CodeValidator();
-const retryHandler = new RetryHandler();
+// Security headers (allow iframe same-origin for preview)
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+}));
 
-// Routes
+// Compression
+app.use(compression());
+
+// CORS
+app.use(cors({
+    origin: process.env.NODE_ENV === 'production' ? CORS_ORIGINS : '*',
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+app.use(express.json({ limit: '10mb' }));
+
+// Request logging
+app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+        const duration = Date.now() - start;
+        if (req.path !== '/health') {
+            logger.info(`${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
+        }
+    });
+    next();
+});
+
+// Rate limiting — API routes
+const apiLimiter = rateLimit({
+    windowMs: 60 * 1000,      // 1 minute
+    max: 30,                    // 30 requests/min per IP for API routes
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please wait a minute.' },
+});
+
+// Stricter limiter for generation (expensive LLM calls)
+const generationLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,                    // 10 generations/min per IP
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Generation rate limit exceeded. Please wait before generating again.' },
+});
+
+app.use('/api/', apiLimiter);
+
+// ─── Service Instances ───────────────────────────────────────────────────────
+
+const analysisService = new AnalysisService();
+const projectGenerationService = new ProjectGenerationService(GENERATED_DIR);
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+
 app.get('/health', (req, res) => {
-    res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+    res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        version: '2.0.0',
+        frameworks: ['vanilla-js', 'react', 'react-ts', 'nextjs', 'vue', 'svelte', 'angular', 'astro'],
+    });
 });
 
-app.post('/api/analyze', async (req, res) => {
+// Download project as ZIP
+app.get('/download/:projectId', (req, res) => {
+    const { projectId } = req.params;
+    if (!projectId || /[^a-zA-Z0-9_-]/.test(projectId)) {
+        return res.status(400).json({ error: 'Invalid project ID' });
+    }
+    const projectDir = path.join(GENERATED_DIR, projectId);
+    if (!fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) {
+        return res.status(404).json({ error: 'Project not found' });
+    }
+    const zipName = `${projectId}.zip`;
+    res.attachment(zipName);
+    res.setHeader('Content-Type', 'application/zip');
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', (err) => {
+        logger.error('Archive error', err);
+        if (!res.headersSent) res.status(500).json({ error: 'Failed to create archive' });
+    });
+    archive.pipe(res);
+    archive.directory(projectDir, false);
+    archive.finalize();
+});
+
+// Analyze prompt
+app.post('/api/analyze', generationLimiter, async (req, res) => {
     try {
-        const { prompt: userPrompt } = req.body;
-        if (!userPrompt) {
-            return res.status(400).json({ error: 'Prompt is required' });
+        const userPrompt = req.body?.prompt;
+        if (!userPrompt || typeof userPrompt !== 'string' || userPrompt.trim().length === 0) {
+            return res.status(400).json({ error: 'Prompt is required and must be a non-empty string' });
         }
-
-        const prompt = ANALYZER_PROMPT.replace('{prompt}', userPrompt);
-        
-        try {
-            const response = await generateCompletion(prompt, { maxTokens: 500, temperature: 0.1 });
-            
-            // Extract JSON
-            let jsonStr = response;
-            const match = response.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || response.match(/(\{[\s\S]*\})/);
-            if (match) {
-                jsonStr = match[1];
-            }
-
-            const result = JSON.parse(jsonStr);
-            // Defaults
-            result.projectType = result.projectType || 'web-app';
-            result.features = result.features || ["responsive design", "modern UI"];
-            result.styling = result.styling || 'modern';
-            result.framework = result.framework || 'vanilla-js';
-            
-            res.json(result);
-        } catch (e) {
-            logger.error(`Analyze error: ${e.message}`);
-            // Fallback
-            const framework = userPrompt.toLowerCase().includes('react') ? 'react' : 'vanilla-js';
-            let projectType = 'web-app';
-            if (userPrompt.toLowerCase().includes('dashboard')) projectType = 'dashboard';
-            else if (userPrompt.toLowerCase().includes('blog')) projectType = 'blog';
-            else if (userPrompt.toLowerCase().includes('portfolio')) projectType = 'portfolio';
-
-            res.json({
-                projectType,
-                features: ["responsive design", "modern UI"],
-                styling: "modern",
-                framework,
-                isFallback: true
-            });
+        if (userPrompt.length > 10000) {
+            return res.status(400).json({ error: 'Prompt is too long (max 10000 characters)' });
         }
+        const options = {
+            framework: req.body?.framework || 'auto',
+            styling: req.body?.styling || 'auto',
+        };
+        const result = await analysisService.analyzePrompt(userPrompt.trim(), options);
+        return res.json(result);
     } catch (e) {
-        logger.error(`API Error: ${e.message}`);
-        res.status(500).json({ error: e.message });
+        logger.error(`Analyze API error: ${e.message}`);
+        return res.status(500).json({ error: 'Analysis failed', details: e.message });
     }
 });
 
-app.post('/api/plan', async (req, res) => {
+// Generate plan
+app.post('/api/plan', generationLimiter, async (req, res) => {
     try {
-        const { requirements } = req.body;
-        if (!requirements) {
-            return res.status(400).json({ error: 'Requirements are required' });
+        const requirements = req.body?.requirements;
+        if (!requirements || typeof requirements !== 'object') {
+            return res.status(400).json({ error: 'Requirements object is required' });
         }
-
-        const projectType = requirements.projectType || 'web-app';
-        const prompt = PLANNER_PROMPT
-            .replace('{requirements}', JSON.stringify(requirements, null, 2))
-            .replace('{projectType}', projectType);
-
-        try {
-            const response = await generateCompletion(prompt, { maxTokens: 800, temperature: 0.1 });
-            
-            let jsonStr = response;
-            const match = response.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || response.match(/(\{[\s\S]*\})/);
-            if (match) {
-                jsonStr = match[1];
-            }
-
-            let result = JSON.parse(jsonStr);
-            
-            // Ensure HTML exists
-            const hasHtml = result.files?.some(f => (f.path || f).includes('index.html'));
-            if (!hasHtml) {
-                if (!result.files) result.files = [];
-                result.files.unshift({ path: "index.html", purpose: "Main HTML page" });
-            }
-
-            res.json(result);
-        } catch (e) {
-            logger.error(`Plan error: ${e.message}`);
-            // Fallback
-            const isReact = requirements.framework === 'react';
-            res.json({
-                files: isReact ? [
-                    { path: "index.html", purpose: "Entry point" },
-                    { path: "src/App.jsx", purpose: "Main component" },
-                    { path: "src/index.css", purpose: "Styles" }
-                ] : [
-                    { path: "index.html", purpose: "Main page" },
-                    { path: "styles.css", purpose: "Styles" },
-                    { path: "script.js", purpose: "Interactivity" }
-                ],
-                techStack: isReact ? ["React", "Tailwind CSS"] : ["HTML", "CSS", "JavaScript"],
-                isFallback: true
-            });
-        }
+        const result = await analysisService.generatePlan(requirements);
+        return res.json(result);
     } catch (e) {
-        logger.error(`API Error: ${e.message}`);
-        res.status(500).json({ error: e.message });
+        logger.error(`Plan API error: ${e.message}`);
+        return res.status(500).json({ error: 'Planning failed', details: e.message });
     }
 });
 
-// Socket.IO
+// ─── Socket.IO — Generation with Streaming ──────────────────────────────────
+
+// Track active generations per socket to prevent duplicates
+const activeGenerations = new Map();
+
 io.on('connection', (socket) => {
     logger.info(`Client connected: ${socket.id}`);
 
     socket.on('generate_project', async (data) => {
-        const startTime = Date.now();
-        const { prompt: userPrompt, requirements, plan } = data;
-        
-        logger.info("NEW GENERATION REQUEST", { userPrompt });
-
-        const projectId = `project_${Math.abs(hashString(userPrompt)) % 10000}`;
-        const projectDir = path.join(GENERATED_DIR, projectId);
-        
-        if (!fs.existsSync(projectDir)) {
-            fs.mkdirSync(projectDir, { recursive: true });
+        // Prevent concurrent generations for same socket
+        if (activeGenerations.has(socket.id)) {
+            socket.emit('generation_error', { error: 'A generation is already in progress. Please wait.' });
+            return;
         }
 
-        socket.emit('status', { message: 'Starting generation...', progress: 0 });
+        activeGenerations.set(socket.id, true);
 
-        const files = plan.files || [];
-        const totalFiles = files.length;
+        try {
+            const { prompt: userPrompt, requirements, plan } = data;
 
-        // Sort files (HTML first)
-        files.sort((a, b) => {
-            const pathA = (a.path || a).toLowerCase();
-            const pathB = (b.path || b).toLowerCase();
-            if (pathA.includes('index.html')) return -1;
-            if (pathB.includes('index.html')) return 1;
-            return 0;
-        });
-
-        for (let i = 0; i < totalFiles; i++) {
-            // Add a small delay to ensure resources are freed
-            if (i > 0) await new Promise(resolve => setTimeout(resolve, 500));
-
-            const fileInfo = files[i];
-            const filePath = typeof fileInfo === 'string' ? fileInfo : fileInfo.path;
-            
-            // Security check
-            if (filePath.includes('..') || path.isAbsolute(filePath)) {
-                logger.warn(`Invalid file path skipped: ${filePath}`);
-                continue;
+            if (!userPrompt || !requirements || !plan) {
+                socket.emit('generation_error', { error: 'Missing required fields: prompt, requirements, or plan' });
+                return;
             }
 
-            logger.info(`Generating file ${i+1}/${totalFiles}: ${filePath}`);
-            socket.emit('status', {
-                message: `Generating ${filePath}...`,
-                progress: Math.floor((i / totalFiles) * 100)
+            logger.info('NEW GENERATION REQUEST', {
+                userPrompt: userPrompt.substring(0, 100),
+                framework: requirements.framework,
+                styling: requirements.stylingFramework,
+                complexity: requirements.complexity,
+                fileCount: plan.files?.length
             });
 
-            const prompt = CODE_GENERATOR_PROMPT
-                .replace('{userPrompt}', userPrompt)
-                .replace('{projectType}', requirements.projectType || 'web-app')
-                .replace('{styling}', requirements.styling || 'modern')
-                .replace('{file_path}', filePath)
-                .replace('{requirements}', JSON.stringify(requirements, null, 2));
-
-            const generateFunc = async (p) => {
-                try {
-                    const result = await generateCompletion(p, { maxTokens: 2048, temperature: 0.3 });
-                    
-                    let code = result;
-                    
-                    // 1. Try to extract from markdown code blocks
-                    const codeBlockMatch = result.match(/```(?:\w+)?\s*([\s\S]*?)```/);
-                    if (codeBlockMatch) {
-                        code = codeBlockMatch[1];
-                    }
-                    
-                    // 2. Clean up markdown tags if they remain
-                    code = code.replace(/```\w*\n?/g, '').replace(/```/g, '');
-                    
-                    // 3. File-type specific extraction
-                    if (filePath.endsWith('.html')) {
-                        const htmlMatch = code.match(/<!DOCTYPE\s+html>[\s\S]*<\/html>/i);
-                        if (htmlMatch) {
-                            code = htmlMatch[0];
-                        }
-                    }
-                    
-                    code = code.trim();
-                    return { code, error: null };
-                } catch (e) {
-                    return { code: null, error: e.message };
+            const result = await projectGenerationService.generateProject({
+                userPrompt,
+                requirements,
+                plan,
+                onProgress: (message, progress, extra) => {
+                    socket.emit('status', { message, progress, ...extra });
+                },
+                onFileGenerated: (fileData) => {
+                    socket.emit('file_generated', fileData);
+                },
+                onFileChunk: (chunkData) => {
+                    socket.emit('file_chunk', chunkData);
+                },
+                onPlan: (planData) => {
+                    socket.emit('generation_plan', planData);
+                },
+                onError: (error) => {
+                    socket.emit('file_error', error);
                 }
-            };
+            });
 
-            let code = null;
-            
-            // Try generation with retry
-            const retryResult = await retryHandler.retryWithFeedback(generateFunc, prompt, "Previous attempt failed", filePath);
-            
-            if (retryResult.success) {
-                code = retryResult.code;
-            } else {
-                logger.warn(`Generation failed for ${filePath}, using template fallback`);
-                try {
-                    code = getTemplate(filePath, {
-                        projectType: requirements.projectType,
-                        title: 'My Website',
-                        description: userPrompt.substring(0, 200)
-                    });
-                } catch (e) {
-                    logger.error(`Template fallback failed: ${e.message}`);
-                    code = `// Error generating ${filePath}`;
-                }
-            }
+            socket.emit('generation_complete', {
+                message: 'Project generated successfully',
+                projectId: result.projectId,
+                downloadUrl: result.downloadUrl,
+                metrics: { duration: result.duration, filesGenerated: result.filesGenerated },
+                error: null
+            });
 
-            // Validation
-            let validationResult = validator.validateFile(code, filePath);
-            
-            // Auto-fix usage
-            if (validationResult.fixedCode) {
-                code = validationResult.fixedCode;
-                logger.info(`Auto-fixed ${filePath}: ${validationResult.fixesApplied.join(', ')}`);
-            }
+        } catch (error) {
+            logger.error(`Generation error: ${error.message}`, { error: error.stack });
+            socket.emit('generation_error', {
+                error: error.message || 'Project generation failed',
+                details: error.stack
+            });
+        } finally {
+            activeGenerations.delete(socket.id);
+        }
+    });
 
-            // Save file
-            const fullPath = path.join(projectDir, filePath);
-            const dirName = path.dirname(fullPath);
-            if (!fs.existsSync(dirName)) fs.mkdirSync(dirName, { recursive: true });
-            
-            fs.writeFileSync(fullPath, code);
-            
-            socket.emit('file_generated', {
-                path: filePath,
-                content: code,
-                validation: {
-                    is_valid: validationResult.isValid,
-                    warnings: validationResult.warnings
-                }
+    socket.on('cancel_generation', () => {
+        if (activeGenerations.has(socket.id)) {
+            activeGenerations.set(socket.id, 'cancelled');
+            logger.info(`Generation cancelled for ${socket.id}`);
+            socket.emit('generation_complete', {
+                message: 'Generation cancelled by user',
+                metrics: null,
+                error: null,
             });
         }
+    });
 
-        socket.emit('generation_complete', {
-            message: 'Project generated successfully',
-            projectId,
-            downloadUrl: `/download/${projectId}` // Not implemented yet but standard
-        });
-        
-        const duration = (Date.now() - startTime) / 1000;
-        logger.info(`Generation complete in ${duration}s`);
+    socket.on('disconnect', () => {
+        activeGenerations.delete(socket.id);
+        logger.info(`Client disconnected: ${socket.id}`);
     });
 });
 
-// Helper
-function hashString(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash;
+// ─── Graceful Shutdown ──────────────────────────────────────────────────────
+
+const gracefulShutdown = (signal) => {
+    logger.info(`${signal} received. Shutting down gracefully...`);
+    server.close(() => {
+        logger.info('HTTP server closed');
+        process.exit(0);
+    });
+    setTimeout(() => {
+        logger.error('Forced shutdown after timeout');
+        process.exit(1);
+    }, 10000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('uncaughtException', (err) => {
+    logger.error('Uncaught exception', { error: err.message, stack: err.stack });
+});
+process.on('unhandledRejection', (reason) => {
+    logger.error('Unhandled rejection', { reason: String(reason) });
+});
+
+// ─── Start Server ───────────────────────────────────────────────────────────
+
+const PORT = parseInt(process.env.PORT, 10) || 5001;
+
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        logger.error(`Port ${PORT} already in use. Run: lsof -ti:${PORT} | xargs kill`);
+        process.exit(1);
     }
-    return hash;
+    logger.error('Server error', err);
+    process.exit(1);
+});
+
+if (!process.env.BUILD_CHECK) {
+    server.listen(PORT, async () => {
+        logger.info(`Backend v2.0 running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
+        try {
+            await initializeModel();
+        } catch (e) {
+            logger.error('Failed to initialize model on startup', e);
+        }
+    });
 }
 
-// Start Server
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, async () => {
-    logger.info(`Node.js Backend running on port ${PORT}`);
-    try {
-        await initializeModel();
-    } catch (e) {
-        logger.error("Failed to initialize model on startup", e);
-    }
-});
+export { app };

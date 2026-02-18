@@ -381,6 +381,35 @@ export const generateCompletion = async (prompt, options = {}) => {
     }
 };
 
+// ─── Fix Completion (non-streaming, lower temperature, repair-focused) ──────
+export const generateFix = async (prompt, options = {}) => {
+    try {
+        await initializeModel();
+
+        const systemPrompt = options.systemPrompt ||
+            "You are a code repair agent. You receive code that has validation errors. " +
+            "Fix ONLY the errors described. Output ONLY the corrected, complete file code. " +
+            "No explanations, no markdown code fences, no conversational text. " +
+            "Preserve all existing functionality and styling.";
+
+        const response = await anthropic.messages.create({
+            model: options.model || "claude-sonnet-4-20250514",
+            max_tokens: options.maxTokens || 4096,
+            temperature: options.temperature ?? 0.1,
+            system: systemPrompt,
+            messages: [
+                { role: "user", content: prompt }
+            ]
+        });
+
+        const textContent = response.content.find(block => block.type === 'text')?.text || '';
+        return textContent;
+    } catch (e) {
+        console.error("Fix generation error:", e);
+        throw e;
+    }
+};
+
 // ─── Streaming Completion ───────────────────────────────────────────────────
 export const generateCompletionStream = async (prompt, options = {}, onChunk) => {
     try {

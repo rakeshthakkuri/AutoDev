@@ -1,10 +1,8 @@
 import { create } from 'zustand';
-import io from 'socket.io-client';
 import axios from 'axios';
 
 // In dev, use same origin so Vite proxy forwards to backend (5001). In prod, use env or default.
 const API_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL || 'http://localhost:5001');
-const socket = io(API_URL || undefined);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -54,8 +52,11 @@ interface GenerationState {
 
   // ── Streaming state
   streamingFile: string | null;       // Currently streaming file path
-  streamingContent: string;           // Accumulated streaming content
+  streamingContent: string;           // Accumulated streaming content (built from deltas)
   generationPlan: GenerationPlan | null;  // Plan received before generation
+
+  // ── Agentic fix state
+  fixingFiles: Record<string, { attempt: number; totalAttempts: number; errors: string[] }>;
 
   // ── User preferences
   selectedFramework: string;          // 'auto' | 'vanilla-js' | 'react' | ...
@@ -74,106 +75,77 @@ interface GenerationState {
   loadProject: (files: Record<string, string>, editedFiles?: Record<string, string>, prompt?: string) => void;
   resetProject: () => void;
   cancelGeneration: () => void;
+  checkHealth: () => Promise<void>;
   setSelectedFramework: (framework: string) => void;
   setSelectedStyling: (styling: string) => void;
   setSelectedComplexity: (complexity: string) => void;
 }
 
-// ─── Store ───────────────────────────────────────────────────────────────────
+// ─── SSE Stream Parser ───────────────────────────────────────────────────────
 
-export const GenerationStore = create<GenerationState>((set, get) => {
-  // ── Socket connection tracking
-  set({ backendConnected: socket.connected });
-  socket.on('connect', () => set({ backendConnected: true }));
-  socket.on('disconnect', () => set({ backendConnected: false }));
-  socket.on('connect_error', () => set({ backendConnected: false }));
+interface SSEEvent {
+  event: string;
+  data: string;
+}
 
-  // ── Progress updates
-  socket.on('status', (data) => {
-    set({ progress: data.progress ?? get().progress });
-  });
+/**
+ * Parse SSE events from a ReadableStream.
+ * Calls `onEvent` for each complete event received.
+ */
+async function parseSSEStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onEvent: (evt: SSEEvent) => void,
+  signal?: AbortSignal,
+) {
+  const decoder = new TextDecoder();
+  let buffer = '';
 
-  // ── Generation plan (received before files start generating)
-  socket.on('generation_plan', (data: GenerationPlan) => {
-    set({ generationPlan: data });
-  });
+  try {
+    while (true) {
+      if (signal?.aborted) break;
 
-  // ── Streaming: receive code chunks as they're generated
-  socket.on('file_chunk', (data: { path: string; chunk: string; accumulated: string }) => {
-    set({
-      streamingFile: data.path,
-      streamingContent: data.accumulated,
-    });
-  });
+      const { done, value } = await reader.read();
+      if (done) break;
 
-  // ── File fully generated
-  socket.on('file_generated', (data) => {
-    set((state) => ({
-      files: { ...state.files, [data.path]: data.content },
-      validationResults: {
-        ...state.validationResults,
-        [data.path]: data.validation || { is_valid: true, errors: [], warnings: [], fixes_applied: [] }
-      },
-      // Clear streaming state for this file
-      streamingFile: state.streamingFile === data.path ? null : state.streamingFile,
-      streamingContent: state.streamingFile === data.path ? '' : state.streamingContent,
-    }));
-  });
+      buffer += decoder.decode(value, { stream: true });
 
-  // ── File validation update
-  socket.on('file_validated', (data) => {
-    set((state) => ({
-      validationResults: {
-        ...state.validationResults,
-        [data.path]: {
-          is_valid: data.is_valid,
-          errors: data.errors || [],
-          warnings: data.warnings || [],
-          fixes_applied: data.fixes_applied || []
+      // SSE events are separated by double newlines
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || '';
+
+      for (const part of parts) {
+        if (!part.trim()) continue;
+
+        let eventName = '';
+        let eventData = '';
+
+        for (const line of part.split('\n')) {
+          if (line.startsWith('event: ')) {
+            eventName = line.slice(7);
+          } else if (line.startsWith('data: ')) {
+            eventData = line.slice(6);
+          }
+        }
+
+        if (eventName && eventData) {
+          onEvent({ event: eventName, data: eventData });
         }
       }
-    }));
-  });
-
-  // ── File error
-  socket.on('file_error', (data) => {
-    set((state) => ({
-      fileErrors: {
-        ...state.fileErrors,
-        [data.path]: { path: data.path, error: data.error, attempts: data.attempts || 0 }
-      }
-    }));
-    console.error(`File generation error for ${data.path}:`, data.error);
-  });
-
-  // ── Generation complete
-  socket.on('generation_complete', (data) => {
-    set({
-      isGenerating: false,
-      progress: 100,
-      metrics: data.metrics || null,
-      streamingFile: null,
-      streamingContent: '',
-    });
-
-    if (data.error) {
-      set({ error: { code: data.error.code, message: data.error.message, details: data.error.details } });
-    } else {
-      set({ error: null });
-      console.log('Download URL:', API_URL + data.downloadUrl);
     }
-  });
+  } catch (err: any) {
+    // AbortError is expected when cancelling
+    if (err.name !== 'AbortError') {
+      throw err;
+    }
+  }
+}
 
-  // ── Generation error (fatal)
-  socket.on('generation_error', (data) => {
-    set({
-      isGenerating: false,
-      error: { code: 'GENERATION_ERROR', message: data.error || 'Generation failed', details: { stack: data.details } },
-      streamingFile: null,
-      streamingContent: '',
-    });
-  });
+// ─── Store ───────────────────────────────────────────────────────────────────
 
+// Shared abort controller for the active generation SSE stream
+let activeAbortController: AbortController | null = null;
+
+export const GenerationStore = create<GenerationState>((set, get) => {
   // ─── Return initial state + actions ────────────────────────────────────────
   return {
     files: {},
@@ -181,7 +153,7 @@ export const GenerationStore = create<GenerationState>((set, get) => {
     isGenerating: false,
     progress: 0,
     error: null,
-    backendConnected: socket.connected,
+    backendConnected: false,
     fileErrors: {},
     validationResults: {},
     metrics: null,
@@ -189,9 +161,19 @@ export const GenerationStore = create<GenerationState>((set, get) => {
     streamingFile: null,
     streamingContent: '',
     generationPlan: null,
+    fixingFiles: {},
     selectedFramework: 'auto',
     selectedStyling: 'auto',
     selectedComplexity: 'simple',
+
+    checkHealth: async () => {
+      try {
+        const res = await fetch(`${API_URL}/health`, { method: 'GET', signal: AbortSignal.timeout(3000) });
+        set({ backendConnected: res.ok });
+      } catch {
+        set({ backendConnected: false });
+      }
+    },
 
     generateProject: async (prompt: string) => {
       const { hasUnsavedChanges, selectedFramework, selectedStyling, selectedComplexity } = get();
@@ -214,29 +196,27 @@ export const GenerationStore = create<GenerationState>((set, get) => {
         streamingFile: null,
         streamingContent: '',
         generationPlan: null,
+        fixingFiles: {},
       });
 
       try {
         // Health check
         try {
           await axios.get(`${API_URL}/health`, { timeout: 5000 });
-        } catch (healthError: any) {
+          set({ backendConnected: true });
+        } catch {
+          set({ backendConnected: false });
           throw new Error('Backend server is not responding. Please ensure the server is running on port 5001.');
         }
 
         // Step 1: Analyze (pass framework/styling preferences)
         const analyzeRes = await axios.post(
           `${API_URL}/api/analyze`,
-          {
-            prompt,
-            framework: selectedFramework,
-            styling: selectedStyling,
-          },
+          { prompt, framework: selectedFramework, styling: selectedStyling },
           { timeout: 60000 }
         );
         const requirements = {
           ...analyzeRes.data,
-          // Override complexity from user selection
           complexity: selectedComplexity,
         };
 
@@ -252,10 +232,133 @@ export const GenerationStore = create<GenerationState>((set, get) => {
 
         set({ progress: 25 });
 
-        // Step 3: Generate via WebSocket (streaming)
-        socket.emit('generate_project', { prompt, requirements, plan });
+        // Step 3: Generate via SSE stream
+        const abortController = new AbortController();
+        activeAbortController = abortController;
+
+        const response = await fetch(`${API_URL}/api/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, requirements, plan }),
+          signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => ({ error: 'Generation request failed' }));
+          throw new Error(errorBody.error || `Server error ${response.status}`);
+        }
+
+        const reader = response.body!.getReader();
+
+        await parseSSEStream(reader, (evt) => {
+          try {
+            const data = JSON.parse(evt.data);
+
+            switch (evt.event) {
+              case 'status':
+                set({ progress: data.progress ?? get().progress });
+                break;
+
+              case 'generation_plan':
+                set({ generationPlan: data as GenerationPlan });
+                break;
+
+              case 'file_chunk': {
+                // Accumulate deltas client-side
+                const currentState = get();
+                const isSameFile = currentState.streamingFile === data.path;
+                set({
+                  streamingFile: data.path,
+                  streamingContent: (isSameFile ? currentState.streamingContent : '') + data.chunk,
+                });
+                break;
+              }
+
+              case 'file_generated':
+                set((state) => ({
+                  files: { ...state.files, [data.path]: data.content },
+                  validationResults: {
+                    ...state.validationResults,
+                    [data.path]: data.validation || { is_valid: true, errors: [], warnings: [], fixes_applied: [] }
+                  },
+                  streamingFile: state.streamingFile === data.path ? null : state.streamingFile,
+                  streamingContent: state.streamingFile === data.path ? '' : state.streamingContent,
+                }));
+                break;
+
+              case 'file_fixing':
+                set((state) => ({
+                  fixingFiles: {
+                    ...state.fixingFiles,
+                    [data.path]: { attempt: data.attempt, totalAttempts: data.totalAttempts, errors: data.errors || [] }
+                  }
+                }));
+                break;
+
+              case 'file_fixed':
+                set((state) => {
+                  const { [data.path]: _, ...remainingFixing } = state.fixingFiles;
+                  return {
+                    files: { ...state.files, [data.path]: data.content },
+                    validationResults: {
+                      ...state.validationResults,
+                      [data.path]: data.validation || { is_valid: true, errors: [], warnings: [], fixes_applied: [] }
+                    },
+                    fixingFiles: remainingFixing,
+                  };
+                });
+                break;
+
+              case 'file_error':
+                set((state) => ({
+                  fileErrors: {
+                    ...state.fileErrors,
+                    [data.path]: { path: data.path, error: data.error, attempts: data.attempts || 0 }
+                  }
+                }));
+                console.error(`File generation error for ${data.path}:`, data.error);
+                break;
+
+              case 'generation_complete':
+                set({
+                  isGenerating: false,
+                  progress: 100,
+                  metrics: data.metrics || null,
+                  streamingFile: null,
+                  streamingContent: '',
+                  fixingFiles: {},
+                });
+                if (data.error) {
+                  set({ error: { code: data.error.code, message: data.error.message, details: data.error.details } });
+                } else {
+                  set({ error: null });
+                  console.log('Download URL:', API_URL + data.downloadUrl);
+                }
+                break;
+
+              case 'generation_error':
+                set({
+                  isGenerating: false,
+                  error: { code: 'GENERATION_ERROR', message: data.error || 'Generation failed', details: { stack: data.details } },
+                  streamingFile: null,
+                  streamingContent: '',
+                });
+                break;
+            }
+          } catch (parseErr) {
+            console.error('Failed to parse SSE event:', evt, parseErr);
+          }
+        }, abortController.signal);
+
+        // If stream ended without a generation_complete event, mark as done
+        if (get().isGenerating) {
+          set({ isGenerating: false });
+        }
 
       } catch (error: any) {
+        // AbortError means user cancelled — don't show error
+        if (error?.name === 'AbortError') return;
+
         console.error('Generation error:', error);
 
         let errorMessage = 'Failed to start generation.';
@@ -281,6 +384,8 @@ export const GenerationStore = create<GenerationState>((set, get) => {
             details: error?.response?.data?.error?.details || { originalError: String(error) }
           }
         });
+      } finally {
+        activeAbortController = null;
       }
     },
 
@@ -329,6 +434,7 @@ export const GenerationStore = create<GenerationState>((set, get) => {
         streamingFile: null,
         streamingContent: '',
         generationPlan: null,
+        fixingFiles: {},
       });
     },
 
@@ -346,11 +452,16 @@ export const GenerationStore = create<GenerationState>((set, get) => {
         streamingFile: null,
         streamingContent: '',
         generationPlan: null,
+        fixingFiles: {},
       });
     },
 
     cancelGeneration: () => {
-      socket.emit('cancel_generation');
+      // Abort the SSE fetch — backend detects the closed connection
+      if (activeAbortController) {
+        activeAbortController.abort();
+        activeAbortController = null;
+      }
       set({
         isGenerating: false,
         streamingFile: null,
@@ -363,3 +474,6 @@ export const GenerationStore = create<GenerationState>((set, get) => {
     setSelectedComplexity: (complexity: string) => set({ selectedComplexity: complexity }),
   };
 });
+
+// Run initial health check
+GenerationStore.getState().checkHealth();

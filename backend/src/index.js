@@ -1,6 +1,5 @@
 import express from 'express';
 import http from 'http';
-import { Server } from 'socket.io';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
@@ -46,13 +45,6 @@ const server = http.createServer(app);
 const CORS_ORIGINS = process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',')
     : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'];
-
-const io = new Server(server, {
-    cors: { origin: process.env.NODE_ENV === 'production' ? CORS_ORIGINS : '*', methods: ['GET', 'POST'] },
-    maxHttpBufferSize: 10e6,
-    pingTimeout: 120000,
-    pingInterval: 25000
-});
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
@@ -183,109 +175,139 @@ app.post('/api/plan', generationLimiter, async (req, res) => {
     }
 });
 
-// ─── Socket.IO — Generation with Streaming ──────────────────────────────────
+// ─── SSE — Generation with Streaming ─────────────────────────────────────────
 
-// Track active generations per socket to prevent duplicates
+// Track active generations per IP to prevent concurrent requests
 const activeGenerations = new Map();
 
-io.on('connection', (socket) => {
-    logger.info(`Client connected: ${socket.id}`);
+/** Send a named SSE event, flushing the compression buffer */
+function sendSSE(res, event, data) {
+    if (res.writableEnded) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (typeof res.flush === 'function') res.flush();
+}
 
-    socket.on('generate_project', async (data) => {
-        // Prevent concurrent generations for same socket
-        if (activeGenerations.has(socket.id)) {
-            socket.emit('generation_error', { error: 'A generation is already in progress. Please wait.' });
-            return;
-        }
+app.post('/api/generate', generationLimiter, async (req, res) => {
+    const clientId = req.ip || 'unknown';
 
-        activeGenerations.set(socket.id, true);
+    // Prevent concurrent generations for same client
+    if (activeGenerations.has(clientId)) {
+        return res.status(409).json({ error: 'A generation is already in progress. Please wait.' });
+    }
 
-        try {
-            const { prompt: userPrompt, requirements, plan } = data;
+    const { prompt: userPrompt, requirements, plan } = req.body || {};
 
-            if (!userPrompt || !requirements || !plan) {
-                socket.emit('generation_error', { error: 'Missing required fields: prompt, requirements, or plan' });
-                return;
-            }
+    if (!userPrompt || !requirements || !plan) {
+        return res.status(400).json({ error: 'Missing required fields: prompt, requirements, or plan' });
+    }
 
-            logger.info('NEW GENERATION REQUEST', {
-                userPrompt: userPrompt.substring(0, 100),
-                framework: requirements.framework,
-                styling: requirements.stylingFramework,
-                complexity: requirements.complexity,
-                fileCount: plan.files?.length
-            });
+    // Set SSE headers
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',   // Disable Nginx buffering if present
+    });
 
-            const result = await projectGenerationService.generateProject({
-                userPrompt,
-                requirements,
-                plan,
-                onProgress: (message, progress, extra) => {
-                    socket.emit('status', { message, progress, ...extra });
-                },
-                onFileGenerated: (fileData) => {
-                    socket.emit('file_generated', fileData);
-                },
-                onFileChunk: (chunkData) => {
-                    socket.emit('file_chunk', chunkData);
-                },
-                onPlan: (planData) => {
-                    socket.emit('generation_plan', planData);
-                },
-                onError: (error) => {
-                    socket.emit('file_error', error);
-                }
-            });
+    let cancelled = false;
+    activeGenerations.set(clientId, true);
 
-            socket.emit('generation_complete', {
+    // Client disconnect = cancel
+    req.on('close', () => {
+        cancelled = true;
+        activeGenerations.delete(clientId);
+        logger.info(`SSE client disconnected (generation cancelled): ${clientId}`);
+    });
+
+    try {
+        logger.info('NEW GENERATION REQUEST', {
+            userPrompt: userPrompt.substring(0, 100),
+            framework: requirements.framework,
+            styling: requirements.stylingFramework,
+            complexity: requirements.complexity,
+            fileCount: plan.files?.length
+        });
+
+        const result = await projectGenerationService.generateProject({
+            userPrompt,
+            requirements,
+            plan,
+            onProgress: (message, progress, extra) => {
+                if (cancelled) return;
+                sendSSE(res, 'status', { message, progress, ...extra });
+            },
+            onFileGenerated: (fileData) => {
+                if (cancelled) return;
+                sendSSE(res, 'file_generated', fileData);
+            },
+            onFileChunk: (chunkData) => {
+                if (cancelled) return;
+                sendSSE(res, 'file_chunk', chunkData);
+            },
+            onPlan: (planData) => {
+                if (cancelled) return;
+                sendSSE(res, 'generation_plan', planData);
+            },
+            onError: (error) => {
+                if (cancelled) return;
+                sendSSE(res, 'file_error', error);
+            },
+            onFileFixing: (fixData) => {
+                if (cancelled) return;
+                sendSSE(res, 'file_fixing', fixData);
+            },
+            onFileFixed: (fixedData) => {
+                if (cancelled) return;
+                sendSSE(res, 'file_fixed', fixedData);
+            },
+        });
+
+        if (!cancelled) {
+            sendSSE(res, 'generation_complete', {
                 message: 'Project generated successfully',
                 projectId: result.projectId,
                 downloadUrl: result.downloadUrl,
                 metrics: { duration: result.duration, filesGenerated: result.filesGenerated },
                 error: null
             });
-
-        } catch (error) {
-            logger.error(`Generation error: ${error.message}`, { error: error.stack });
-            socket.emit('generation_error', {
+        }
+    } catch (error) {
+        logger.error(`Generation error: ${error.message}`, { error: error.stack });
+        if (!cancelled) {
+            sendSSE(res, 'generation_error', {
                 error: error.message || 'Project generation failed',
                 details: error.stack
             });
-        } finally {
-            activeGenerations.delete(socket.id);
         }
-    });
-
-    socket.on('cancel_generation', () => {
-        if (activeGenerations.has(socket.id)) {
-            activeGenerations.set(socket.id, 'cancelled');
-            logger.info(`Generation cancelled for ${socket.id}`);
-            socket.emit('generation_complete', {
-                message: 'Generation cancelled by user',
-                metrics: null,
-                error: null,
-            });
-        }
-    });
-
-    socket.on('disconnect', () => {
-        activeGenerations.delete(socket.id);
-        logger.info(`Client disconnected: ${socket.id}`);
-    });
+    } finally {
+        activeGenerations.delete(clientId);
+        if (!res.writableEnded) res.end();
+    }
 });
 
 // ─── Graceful Shutdown ──────────────────────────────────────────────────────
 
+let isShuttingDown = false;
+
 const gracefulShutdown = (signal) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    
     logger.info(`${signal} received. Shutting down gracefully...`);
+    
+    // Force close existing connections to allow server to close immediately
+    if (server.closeAllConnections) server.closeAllConnections();
+    if (server.closeIdleConnections) server.closeIdleConnections();
+
     server.close(() => {
         logger.info('HTTP server closed');
         process.exit(0);
     });
+    
     setTimeout(() => {
         logger.error('Forced shutdown after timeout');
         process.exit(1);
-    }, 10000);
+    }, 4000);
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

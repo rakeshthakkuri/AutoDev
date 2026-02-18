@@ -97,6 +97,86 @@ export class CodeValidator {
         return { isValid: errors.length === 0, errors, warnings, fixedCode: fixedCode !== code ? fixedCode : null };
     }
 
+    // ─── Common: Truncation & Unterminated String Detection ───────────
+
+    /**
+     * Detect truncated files and unterminated strings — common when LLM
+     * output hits the max_tokens limit and gets cut off mid-expression.
+     */
+    _checkTruncationAndStrings(code, filePath = '') {
+        const errors = [];
+
+        // 1. Check for unterminated string constants (line-by-line)
+        const lines = code.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            // Skip lines that are comments
+            const trimmed = line.trim();
+            if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+
+            // Count unescaped quotes outside of template literals and regex
+            let inSingle = false, inDouble = false, inTemplate = false;
+            for (let j = 0; j < line.length; j++) {
+                const ch = line[j];
+                const prev = j > 0 ? line[j - 1] : '';
+                if (prev === '\\') continue; // escaped
+
+                if (ch === '`') { inTemplate = !inTemplate; continue; }
+                if (inTemplate) continue; // inside template literal, skip
+
+                if (ch === "'" && !inDouble) inSingle = !inSingle;
+                if (ch === '"' && !inSingle) inDouble = !inDouble;
+            }
+
+            if (inSingle || inDouble) {
+                // Check if this is the last non-empty line (truncation) or a genuine error
+                const remainingLines = lines.slice(i + 1).filter(l => l.trim().length > 0);
+                if (remainingLines.length <= 2) {
+                    errors.push(`Unterminated string constant at line ${i + 1} (file likely truncated by token limit)`);
+                } else {
+                    errors.push(`Unterminated string constant at line ${i + 1}`);
+                }
+                break; // Report only the first occurrence
+            }
+        }
+
+        // 2. Check for truncated file — common patterns when LLM output is cut
+        const trimmed = code.trim();
+        const lastLine = lines[lines.length - 1]?.trim() || '';
+        const lastNonEmptyLine = [...lines].reverse().find(l => l.trim().length > 0)?.trim() || '';
+
+        // File should not end mid-attribute or mid-expression
+        if (/[=:,{(\[+\-*\/&|<>]\s*$/.test(lastNonEmptyLine) && !lastNonEmptyLine.endsWith('=>')) {
+            errors.push(`File appears truncated — ends with incomplete expression: "${lastNonEmptyLine.substring(Math.max(0, lastNonEmptyLine.length - 50))}"`);
+        }
+
+        // For JSX/TSX/HTML: file should not end with an unclosed tag
+        const ext = path.extname(filePath).toLowerCase();
+        if (['.jsx', '.tsx', '.html'].includes(ext)) {
+            // Check for unclosed JSX return — if we see "return (" we should see a matching ")"
+            const returnParens = (code.match(/return\s*\(/g) || []).length;
+            const closingParensAfterJsx = (code.match(/^\s*\)\s*;?\s*$/gm) || []).length;
+            if (returnParens > closingParensAfterJsx) {
+                errors.push('Unclosed JSX return statement — missing closing parenthesis');
+            }
+        }
+
+        // For JS/TS: file should end with } or ; or ) for a complete module
+        if (['.js', '.jsx', '.ts', '.tsx'].includes(ext)) {
+            if (trimmed.length > 200) {
+                const endsReasonably = /[};)\]`'"]$/.test(lastNonEmptyLine) ||
+                    lastNonEmptyLine.endsWith('*/') ||
+                    lastNonEmptyLine.startsWith('//') ||
+                    lastNonEmptyLine.startsWith('export');
+                if (!endsReasonably) {
+                    errors.push(`File may be truncated — does not end with a complete statement`);
+                }
+            }
+        }
+
+        return errors;
+    }
+
     // ─── JavaScript Validation ──────────────────────────────────────────
 
     validateJavascript(code, filePath = '') {
@@ -109,6 +189,9 @@ export class CodeValidator {
         const openP = (code.match(/\(/g) || []).length;
         const closeP = (code.match(/\)/g) || []).length;
         if (openP !== closeP) errors.push(`Unmatched parentheses: ${openP} opening, ${closeP} closing`);
+
+        // Truncation and string checks
+        errors.push(...this._checkTruncationAndStrings(code, filePath));
 
         // node --check for .js files (skip for modules with import/export since node may not understand JSX)
         if (!code.includes('import ') && !code.includes('export ')) {
@@ -148,6 +231,14 @@ export class CodeValidator {
         const closeB = (code.match(/}/g) || []).length;
         if (Math.abs(openB - closeB) > 2) errors.push(`Severely unmatched braces: ${openB} opening, ${closeB} closing`);
 
+        // Parenthesis matching
+        const openP = (code.match(/\(/g) || []).length;
+        const closeP = (code.match(/\)/g) || []).length;
+        if (Math.abs(openP - closeP) > 2) errors.push(`Severely unmatched parentheses: ${openP} opening, ${closeP} closing`);
+
+        // Truncation and unterminated string checks
+        errors.push(...this._checkTruncationAndStrings(code, filePath));
+
         return { isValid: errors.length === 0, errors, warnings, fixedCode: fixedCode !== code ? fixedCode : null };
     }
 
@@ -169,6 +260,11 @@ export class CodeValidator {
         const openB = (code.match(/{/g) || []).length;
         const closeB = (code.match(/}/g) || []).length;
         if (Math.abs(openB - closeB) > 2) errors.push(`Unmatched braces: ${openB} opening, ${closeB} closing`);
+
+        // Truncation and unterminated string checks (for .ts files without .tsx)
+        if (!filePath.endsWith('.tsx')) {
+            errors.push(...this._checkTruncationAndStrings(code, filePath));
+        }
 
         // Check for common TS issues
         if (code.includes('any') && code.split('any').length > 10) {
@@ -460,11 +556,17 @@ export class CodeValidator {
         // Cross-file import consistency
         for (const [fp, content] of Object.entries(files)) {
             if (typeof content !== 'string') continue;
-            const imports = content.match(/(?:import|from)\s+['"]\.\/([^'"]+)['"]/g) || [];
-            for (const imp of imports) {
-                const match = imp.match(/['"]\.\/([^'"]+)['"]/);
-                if (match) {
-                    const importedPath = match[1];
+
+            // Match all relative imports: import ... from './path' or require('./path')
+            const importPatterns = [
+                /(?:import|from)\s+['"]\.\.?\/([^'"]+)['"]/g,
+                /require\(\s*['"]\.\.?\/([^'"]+)['"]\s*\)/g,
+            ];
+
+            for (const pattern of importPatterns) {
+                let imp;
+                while ((imp = pattern.exec(content)) !== null) {
+                    const importedPath = imp[1];
                     const dir = path.dirname(fp);
                     const possiblePaths = [
                         path.join(dir, importedPath),
@@ -474,13 +576,64 @@ export class CodeValidator {
                         path.join(dir, importedPath + '.tsx'),
                         path.join(dir, importedPath + '.vue'),
                         path.join(dir, importedPath + '.svelte'),
+                        path.join(dir, importedPath + '.astro'),
+                        path.join(dir, importedPath + '.css'),
+                        path.join(dir, importedPath + '.scss'),
                         path.join(dir, importedPath + '/index.js'),
                         path.join(dir, importedPath + '/index.ts'),
+                        path.join(dir, importedPath + '/index.tsx'),
                     ].map(p => p.replace(/\\/g, '/'));
 
-                    const exists = possiblePaths.some(pp => filePaths.some(fp2 => fp2 === pp || fp2.endsWith(pp)));
+                    const exists = possiblePaths.some(pp =>
+                        filePaths.some(fp2 => fp2 === pp || fp2.endsWith(pp))
+                    );
                     if (!exists) {
-                        warnings.push(`${fp}: imports '${importedPath}' but file not found in project`);
+                        warnings.push(`${fp}: imports './${importedPath}' but file not found in project`);
+                    }
+                }
+            }
+
+            // Check for default export consistency in JS/TS/JSX/TSX files
+            const ext = path.extname(fp).toLowerCase();
+            if (['.js', '.jsx', '.ts', '.tsx'].includes(ext)) {
+                // Files that are imported as default should have a default export
+                const isImportedAsDefault = filePaths.some(otherFp => {
+                    if (otherFp === fp) return false;
+                    const otherContent = files[otherFp];
+                    if (typeof otherContent !== 'string') return false;
+                    const baseName = path.basename(fp, ext);
+                    // Check: import Something from './path/Component'
+                    const defaultImportRe = new RegExp(
+                        `import\\s+[A-Z]\\w*\\s+from\\s+['"][^'"]*${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`
+                    );
+                    return defaultImportRe.test(otherContent);
+                });
+
+                if (isImportedAsDefault) {
+                    const hasDefaultExport = /export\s+default\b/.test(content) ||
+                        /module\.exports\s*=/.test(content);
+                    if (!hasDefaultExport) {
+                        warnings.push(`${fp}: imported as default by another file but has no default export`);
+                    }
+                }
+            }
+
+            // Check HTML files reference existing CSS/JS files via <link> or <script>
+            if (ext === '.html') {
+                // Check <link href="./styles.css"> references
+                const linkRefs = content.match(/(?:href|src)=["'](?!https?:\/\/|\/\/|#|mailto:|data:)([^"']+)["']/g) || [];
+                for (const ref of linkRefs) {
+                    const refMatch = ref.match(/(?:href|src)=["']([^"']+)["']/);
+                    if (refMatch) {
+                        const refPath = refMatch[1];
+                        // Skip anchors, absolute URLs, data URIs
+                        if (refPath.startsWith('#') || refPath.startsWith('http') || refPath.startsWith('data:') || refPath.startsWith('/src/')) continue;
+                        const dir = path.dirname(fp);
+                        const resolvedRef = path.join(dir, refPath).replace(/\\/g, '/');
+                        const exists = filePaths.some(fp2 => fp2 === resolvedRef || fp2 === refPath || fp2.endsWith(refPath));
+                        if (!exists && !refPath.includes('fonts.googleapis') && !refPath.includes('cdn')) {
+                            warnings.push(`${fp}: references '${refPath}' but file not found in project`);
+                        }
                     }
                 }
             }

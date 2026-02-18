@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Sparkles, Home, History, Save, Download, Plus } from 'lucide-react';
+import { Sparkles, Home, History, Save, Download, Plus, Sun, Moon } from 'lucide-react';
 import { GenerationStore } from '../store/generation';
+import { useSettingsStore } from '../store/settings';
 import { getStorageInfo } from '../services/storage';
 
 interface NavbarProps {
@@ -25,9 +26,10 @@ export default function Navbar({
   const location = useLocation();
   const fileCount = GenerationStore((s) => Object.keys(s.files).length);
   const hasEdits = GenerationStore((s) => Object.keys(s.editedFiles).length > 0);
-  // Framework can be used for display — kept in store for future use
   const canSave = fileCount > 0;
   const storageInfo = getStorageInfo();
+  const theme = useSettingsStore((s) => s.theme);
+  const toggleTheme = useSettingsStore((s) => s.toggleTheme);
 
   return (
     <header className="navbar" role="banner">
@@ -40,28 +42,35 @@ export default function Navbar({
 
         <nav className="navbar-actions" aria-label="Main navigation">
           <Link to="/" className={`navbar-btn ${location.pathname === '/' ? 'active' : ''}`} title="Home" aria-label="Home" aria-current={location.pathname === '/' ? 'page' : undefined}>
-            <Home size={18} /><span>Home</span>
+            <Home size={16} /><span>Home</span>
           </Link>
           <Link to="/generate" className={`navbar-btn ${location.pathname === '/generate' ? 'active' : ''}`} title="Generate" aria-label="Generate project" aria-current={location.pathname === '/generate' ? 'page' : undefined}>
-            <span>Generate</span>
+            <Sparkles size={16} /><span>Generate</span>
           </Link>
           <button type="button" onClick={onHistoryOpen} className="navbar-btn" title="Project History" aria-label="Open project history">
-            <History size={18} /><span>History</span>
+            <History size={16} /><span>History</span>
           </button>
+
+          <button type="button" onClick={toggleTheme} className="navbar-btn" title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+
+          {(showNew || showSave || showDownload) && <div className="navbar-divider" />}
+
           {showNew && (
-            <button type="button" onClick={onNewProject} className="navbar-btn" title="New Project (⌘N)" aria-label="New project">
-              <Plus size={18} /><span>New</span>
+            <button type="button" onClick={onNewProject} className="navbar-btn" title="New Project" aria-label="New project">
+              <Plus size={16} /><span>New</span>
             </button>
           )}
           {showSave && (
-            <button type="button" onClick={onSaveClick} className="navbar-btn navbar-btn-primary" disabled={!canSave} title="Save project (⌘S)" aria-label="Save project">
-              <Save size={18} /><span>Save</span>
-              {hasEdits && <span className="navbar-unsaved" aria-hidden="true">•</span>}
+            <button type="button" onClick={onSaveClick} className="navbar-btn navbar-btn-primary" disabled={!canSave} title="Save project" aria-label="Save project">
+              <Save size={16} /><span>Save</span>
+              {hasEdits && <span className="navbar-unsaved" aria-hidden="true">*</span>}
             </button>
           )}
           {showDownload && (
             <button type="button" onClick={onDownloadClick} className="navbar-btn" disabled={!canSave} title="Download as ZIP" aria-label="Download project as ZIP">
-              <Download size={18} /><span>ZIP</span>
+              <Download size={16} /><span>ZIP</span>
             </button>
           )}
         </nav>

@@ -3,15 +3,15 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #0a0a0a;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Color-scheme is driven by data-theme on <html> */
+[data-theme="dark"] { color-scheme: dark; color: #e6edf3; background-color: #0f1117; }
+[data-theme="light"] { color-scheme: light; color: #1f2328; background-color: #ffffff; }
 
 body {
   margin: 0;

@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import Editor from '@monaco-editor/react';
-import { Save, RotateCcw, Keyboard, Map, Loader2 } from 'lucide-react';
+import { Save, RotateCcw, Keyboard, Map, Loader2, ChevronRight } from 'lucide-react';
 import { GenerationStore } from '../store/generation';
+import { useSettingsStore } from '../store/settings';
 
 interface CodeEditorProps {
   file: string;
@@ -36,6 +37,23 @@ function formatFileSize(content: string): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function FileBreadcrumb({ path }: { path: string }) {
+  if (!path) return null;
+  const parts = path.split('/').filter(Boolean);
+  return (
+    <div className="editor-breadcrumb">
+      {parts.map((part, i) => (
+        <span key={i}>
+          {i > 0 && <ChevronRight size={10} className="breadcrumb-separator" />}
+          <span className={i === parts.length - 1 ? 'breadcrumb-current' : ''}>
+            {part}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function CodeEditor({ file, content }: CodeEditorProps) {
   const [editorContent, setEditorContent] = useState(content);
   const [isModified, setIsModified] = useState(false);
@@ -51,6 +69,8 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
     streamingFile,
     streamingContent,
   } = GenerationStore();
+
+  const appTheme = useSettingsStore((s) => s.theme);
 
   const isStreaming = streamingFile === file && !!file;
   const displayContent = isStreaming ? streamingContent : editorContent;
@@ -137,17 +157,17 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
         <span>
           {file ? (
             <>
-              {file}
+              <FileBreadcrumb path={file} />
               {isModified && <span className="dirty-indicator"> *</span>}
               {isStreaming && (
                 <span className="streaming-badge">
                   <Loader2 size={10} className="spin" />
-                  Streaming...
+                  Streaming
                 </span>
               )}
             </>
           ) : (
-            'Select a file'
+            'Select a file to edit'
           )}
         </span>
         {file && (
@@ -161,7 +181,7 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
                 title="Toggle minimap"
                 aria-label="Toggle minimap"
               >
-                <Map size={11} />
+                <Map size={12} />
               </button>
             </div>
 
@@ -178,7 +198,7 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
                   title="Revert changes"
                   aria-label="Revert changes"
                 >
-                  <RotateCcw size={13} />
+                  <RotateCcw size={12} />
                   Revert
                 </button>
                 <button
@@ -187,7 +207,7 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
                   title="Save changes"
                   aria-label="Save changes"
                 >
-                  <Save size={13} />
+                  <Save size={12} />
                   Save
                 </button>
               </>
@@ -202,12 +222,12 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
           defaultLanguage="javascript"
           language={language}
           value={displayContent || '// Select a file to view code'}
-          theme="vs-dark"
+          theme={appTheme === 'dark' ? 'vs-dark' : 'light'}
           onChange={handleEditorChange}
           onMount={handleEditorDidMount}
           options={{
             minimap: { enabled: showMinimap },
-            fontSize: 13,
+            fontSize: 14,
             fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
             readOnly: isStreaming,
             wordWrap: 'on',
@@ -215,6 +235,8 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
             scrollBeyondLastLine: false,
             smoothScrolling: true,
             cursorBlinking: isStreaming ? 'phase' : 'blink',
+            padding: { top: 12 },
+            lineHeight: 22,
           }}
         />
       ) : (

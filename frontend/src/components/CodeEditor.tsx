@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import Editor from '@monaco-editor/react';
-import { Save, RotateCcw, Keyboard } from 'lucide-react';
+import { Save, RotateCcw, Keyboard, Map, Loader2 } from 'lucide-react';
 import { GenerationStore } from '../store/generation';
 
 interface CodeEditorProps {
@@ -8,29 +8,58 @@ interface CodeEditorProps {
   content: string;
 }
 
+function getLanguage(filename: string): string {
+  if (!filename) return 'plaintext';
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  const map: Record<string, string> = {
+    html: 'html', htm: 'html',
+    css: 'css', scss: 'scss', sass: 'scss', less: 'less',
+    js: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    jsx: 'javascript', tsx: 'typescript', ts: 'typescript',
+    json: 'json',
+    md: 'markdown', mdx: 'markdown',
+    vue: 'html',
+    svelte: 'html',
+    astro: 'html',
+    xml: 'xml', svg: 'xml',
+    yaml: 'yaml', yml: 'yaml',
+    toml: 'ini',
+    sh: 'shell', bash: 'shell',
+  };
+  return map[ext] || 'plaintext';
+}
+
+function formatFileSize(content: string): string {
+  const bytes = new Blob([content]).size;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function CodeEditor({ file, content }: CodeEditorProps) {
   const [editorContent, setEditorContent] = useState(content);
   const [isModified, setIsModified] = useState(false);
+  const [showMinimap, setShowMinimap] = useState(false);
   const editorRef = useRef<any>(null);
-  
-  const { 
-    files, 
-    editedFiles, 
-    saveFileEdit, 
+
+  const {
+    files,
+    editedFiles,
+    saveFileEdit,
     revertFileEdit,
-    getFileContent 
+    getFileContent,
+    streamingFile,
+    streamingContent,
   } = GenerationStore();
 
-  const getLanguage = (filename: string) => {
-    if (filename.endsWith('.html')) return 'html';
-    if (filename.endsWith('.css')) return 'css';
-    if (filename.endsWith('.js')) return 'javascript';
-    if (filename.endsWith('.jsx') || filename.endsWith('.tsx')) return 'typescript';
-    if (filename.endsWith('.json')) return 'json';
-    return 'plaintext';
-  };
+  const isStreaming = streamingFile === file && !!file;
+  const displayContent = isStreaming ? streamingContent : editorContent;
 
-  // Update content when file changes
+  const fileSize = useMemo(() => {
+    if (!displayContent) return '';
+    return formatFileSize(displayContent);
+  }, [displayContent]);
+
   useEffect(() => {
     if (!file) {
       setEditorContent('');
@@ -42,8 +71,18 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
     setIsModified(file in editedFiles);
   }, [file, files, editedFiles]);
 
+  useEffect(() => {
+    if (isStreaming && editorRef.current) {
+      const model = editorRef.current.getModel();
+      if (model) {
+        const lineCount = model.getLineCount();
+        editorRef.current.revealLine(lineCount);
+      }
+    }
+  }, [isStreaming, streamingContent]);
+
   const handleEditorChange = (value: string | undefined) => {
-    if (!file) return;
+    if (!file || isStreaming) return;
     const newContent = value || '';
     setEditorContent(newContent);
     const originalContent = files[file] || '';
@@ -63,18 +102,17 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
     setIsModified(false);
   };
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const modKey = isMac ? e.metaKey : e.ctrlKey;
-      
+
       if (modKey && e.key === 's' && file && isModified) {
         e.preventDefault();
         saveFileEdit(file, editorContent);
         setIsModified(false);
       }
-      
+
       if (modKey && e.key === 'z' && !e.shiftKey && file && isModified) {
         e.preventDefault();
         revertFileEdit(file);
@@ -91,6 +129,8 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
     editorRef.current = editor;
   };
 
+  const language = getLanguage(file);
+
   return (
     <div className="code-editor">
       <div className="editor-header">
@@ -99,6 +139,12 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
             <>
               {file}
               {isModified && <span className="dirty-indicator"> *</span>}
+              {isStreaming && (
+                <span className="streaming-badge">
+                  <Loader2 size={10} className="spin" />
+                  Streaming...
+                </span>
+              )}
             </>
           ) : (
             'Select a file'
@@ -106,26 +152,42 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
         </span>
         {file && (
           <div className="editor-actions">
-            <div className="shortcuts-hint">
-              <Keyboard size={12} />
-              <span>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? '⌘' : 'Ctrl'}+S / {navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? '⌘' : 'Ctrl'}+Z</span>
+            {fileSize && <span className="file-size-indicator">{fileSize}</span>}
+
+            <div className="editor-toolbar">
+              <button
+                onClick={() => setShowMinimap(!showMinimap)}
+                className={showMinimap ? 'active' : ''}
+                title="Toggle minimap"
+                aria-label="Toggle minimap"
+              >
+                <Map size={11} />
+              </button>
             </div>
+
+            <div className="shortcuts-hint">
+              <Keyboard size={11} />
+              <span>{navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? '⌘' : 'Ctrl'}+S</span>
+            </div>
+
             {isModified && (
               <>
-                <button 
-                  onClick={handleRevert} 
+                <button
+                  onClick={handleRevert}
                   className="btn-revert"
-                  title="Revert changes (Cmd/Ctrl+Z)"
+                  title="Revert changes"
+                  aria-label="Revert changes"
                 >
-                  <RotateCcw size={16} />
+                  <RotateCcw size={13} />
                   Revert
                 </button>
-                <button 
-                  onClick={handleSave} 
+                <button
+                  onClick={handleSave}
                   className="btn-save"
-                  title="Save changes (Cmd/Ctrl+S)"
+                  title="Save changes"
+                  aria-label="Save changes"
                 >
-                  <Save size={16} />
+                  <Save size={13} />
                   Save
                 </button>
               </>
@@ -133,22 +195,39 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
           </div>
         )}
       </div>
-      <Editor
-        height="100%"
-        defaultLanguage="javascript"
-        language={getLanguage(file)}
-        value={editorContent || (file ? '// Select a file to view code' : '// Select a file to view code')}
-        theme="vs-dark"
-        onChange={handleEditorChange}
-        onMount={handleEditorDidMount}
-        options={{
-          minimap: { enabled: false },
-          fontSize: 14,
-          readOnly: false,
-          wordWrap: 'on',
-          automaticLayout: true
-        }}
-      />
+
+      {file ? (
+        <Editor
+          height="100%"
+          defaultLanguage="javascript"
+          language={language}
+          value={displayContent || '// Select a file to view code'}
+          theme="vs-dark"
+          onChange={handleEditorChange}
+          onMount={handleEditorDidMount}
+          options={{
+            minimap: { enabled: showMinimap },
+            fontSize: 13,
+            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+            readOnly: isStreaming,
+            wordWrap: 'on',
+            automaticLayout: true,
+            scrollBeyondLastLine: false,
+            smoothScrolling: true,
+            cursorBlinking: isStreaming ? 'phase' : 'blink',
+          }}
+        />
+      ) : (
+        <div className="editor-skeleton">
+          <div className="skeleton skeleton-line long" />
+          <div className="skeleton skeleton-line medium" />
+          <div className="skeleton skeleton-line long" />
+          <div className="skeleton skeleton-line short" />
+          <div className="skeleton skeleton-line medium" />
+          <div className="skeleton skeleton-line long" />
+          <div className="skeleton skeleton-line short" />
+        </div>
+      )}
     </div>
   );
 }

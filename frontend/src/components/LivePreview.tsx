@@ -1,7 +1,26 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { RefreshCw, ExternalLink, Smartphone, Tablet, Monitor, Maximize2, Minimize2 } from 'lucide-react';
+import { RefreshCw, ExternalLink, Smartphone, Tablet, Monitor, Eye, Terminal, Loader2 } from 'lucide-react';
 import { GenerationStore } from '../store/generation';
 import { bundleProject, detectProjectType, ProjectType, clearCache } from '../services/bundler';
+
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+const FRAMEWORK_LABELS: Record<string, string> = {
+  react: 'React',
+  vue: 'Vue',
+  svelte: 'Svelte',
+  nextjs: 'Next.js',
+  angular: 'Angular',
+  astro: 'Astro',
+  html: 'HTML',
+  unknown: 'Unknown',
+};
+
+const SERVER_FRAMEWORKS = ['nextjs', 'angular', 'astro'];
 
 interface LivePreviewProps {
   files: Record<string, string>;
@@ -18,36 +37,24 @@ export default function LivePreview({ files }: LivePreviewProps) {
   const [responsiveWidth, setResponsiveWidth] = useState(100);
   const [bundlerErrors, setBundlerErrors] = useState<string[]>([]);
   const [bundlerWarnings, setBundlerWarnings] = useState<string[]>([]);
-  const { editedFiles, getFileContent } = GenerationStore();
+  const [showDevInstructions, setShowDevInstructions] = useState(false);
+  const { editedFiles, getFileContent, generationPlan } = GenerationStore();
 
-  // Get file content (edited or original)
-  const getContent = useCallback((path: string) => {
-    return getFileContent(path);
-  }, [getFileContent]);
+  const getContent = useCallback((path: string) => getFileContent(path), [getFileContent]);
 
-  // Get all files (edited or original)
   const getAllFiles = useCallback((): Record<string, string> => {
     const allFiles: Record<string, string> = {};
-    const filePaths = Object.keys(files);
-    
-    for (const path of filePaths) {
+    for (const path of Object.keys(files)) {
       allFiles[path] = getContent(path);
     }
-    
-    // Also include any edited files that might not be in the original files
     for (const path of Object.keys(editedFiles)) {
-      if (!allFiles[path]) {
-        allFiles[path] = editedFiles[path];
-      }
+      if (!allFiles[path]) allFiles[path] = editedFiles[path];
     }
-    
     return allFiles;
   }, [files, editedFiles, getContent]);
 
-  // Bundle and render project
   const renderPreview = useCallback(async () => {
     if (!iframeRef.current) return;
-
     setIsLoading(true);
     setError(null);
     setBundlerErrors([]);
@@ -55,21 +62,16 @@ export default function LivePreview({ files }: LivePreviewProps) {
 
     try {
       const allFiles = getAllFiles();
-      
-      // Ensure files is defined
-      if (!allFiles || typeof allFiles !== 'object' || Object.keys(allFiles).length === 0) {
+      if (!allFiles || Object.keys(allFiles).length === 0) {
         setError('No files available');
         setIsLoading(false);
         return;
       }
 
-      // Detect project type
       const detectedType = detectProjectType(allFiles);
       setProjectType(detectedType);
 
-      // Bundle project
       const bundled = bundleProject(allFiles);
-      
       setBundlerErrors(bundled.errors);
       setBundlerWarnings(bundled.warnings);
 
@@ -79,66 +81,39 @@ export default function LivePreview({ files }: LivePreviewProps) {
         return;
       }
 
-      // If no HTML file and not a React project, show placeholder
-      if (!bundled.html && detectedType === 'html') {
-        const hasFiles = Object.keys(allFiles).length > 0;
+      if (!bundled.html) {
         const iframe = iframeRef.current;
         const doc = iframe.contentDocument || iframe.contentWindow?.document;
         if (doc) {
           doc.open();
-          if (hasFiles) {
-            doc.write(`
-              <html>
-                <head>
-                  <style>
-                    body { 
-                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                      padding: 2rem;
-                      color: #666;
-                      text-align: center;
-                    }
-                    .message { margin: 2rem 0; }
-                    .files { 
-                      margin-top: 2rem;
-                      padding: 1rem;
-                      background: #f5f5f5;
-                      border-radius: 8px;
-                      text-align: left;
-                    }
-                    .file-item { margin: 0.5rem 0; }
-                  </style>
-                </head>
-                <body>
-                  <h1>Preview Unavailable</h1>
-                  <div class="message">
-                    <p>No HTML file was generated. The preview requires an <code>index.html</code> file.</p>
-                    <p>Generated files:</p>
-                    <div class="files">
-                      ${Object.keys(allFiles).map(f => `<div class="file-item">📄 ${f}</div>`).join('')}
-                    </div>
-                  </div>
-                </body>
-              </html>
-            `);
-          } else {
-            doc.write('<html><body><h1 style="padding: 2rem; color: #666;">Preview will appear here</h1></body></html>');
-          }
+          doc.write(`<html><body style="font-family:sans-serif;padding:2rem;color:#666;text-align:center">
+            <h2>Preview Unavailable</h2>
+            <p>No renderable content found. Generated files:</p>
+            <div style="margin-top:1rem;padding:1rem;background:#f5f5f5;border-radius:8px;text-align:left">
+              ${Object.keys(allFiles).map(f => `<div style="margin:.25rem 0">${escapeHtml(f)}</div>`).join('')}
+            </div>
+          </body></html>`);
           doc.close();
         }
-        setError(hasFiles ? 'No HTML file found' : null);
         setIsLoading(false);
         return;
       }
 
-      // Render bundled HTML
       const iframe = iframeRef.current;
       const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      
       if (doc && bundled.html) {
-        doc.open();
-        doc.write(bundled.html);
-        doc.close();
-        setError(null);
+        try {
+          doc.open();
+          doc.write(bundled.html);
+          doc.close();
+          setError(null);
+        } catch (writeErr) {
+          const msg = writeErr instanceof Error ? writeErr.message : 'Failed to render preview';
+          doc.open();
+          doc.write(`<!DOCTYPE html><html><body style="font-family:sans-serif;padding:1.5rem;color:#333"><h2 style="color:#c00">Preview Error</h2><p>${escapeHtml(msg)}</p></body></html>`);
+          doc.close();
+          setError(msg);
+        }
       }
     } catch (err) {
       console.error('Preview error:', err);
@@ -148,151 +123,135 @@ export default function LivePreview({ files }: LivePreviewProps) {
     }
   }, [getAllFiles]);
 
-  // Render on files change
-  useEffect(() => {
-    renderPreview();
-  }, [renderPreview]);
+  useEffect(() => { renderPreview(); }, [renderPreview]);
 
-  // Handle refresh
-  const handleRefresh = () => {
-    clearCache();
-    renderPreview();
-  };
+  const handleRefresh = () => { clearCache(); renderPreview(); };
 
-  // Handle open in new tab
   const handleOpenInNewTab = () => {
     const allFiles = getAllFiles();
     const bundled = bundleProject(allFiles);
-    
     if (bundled.html) {
       const newWindow = window.open();
-      if (newWindow) {
-        newWindow.document.write(bundled.html);
-        newWindow.document.close();
-      }
+      if (newWindow) { newWindow.document.write(bundled.html); newWindow.document.close(); }
     }
   };
 
-  // Get device frame styles
-  const getDeviceFrameStyles = (): React.CSSProperties => {
-    const baseStyle: React.CSSProperties = {
-      width: '100%',
-      height: '100%',
-      border: 'none',
-      transition: 'all 0.3s ease',
-    };
+  const isServerFramework = SERVER_FRAMEWORKS.includes(projectType);
+  const detectedFramework = generationPlan?.framework || projectType;
 
+  const getIframeClassName = (): string => {
     switch (deviceFrame) {
-      case 'mobile':
-        return {
-          ...baseStyle,
-          maxWidth: `${375 * (responsiveWidth / 100)}px`,
-          margin: '0 auto',
-          border: '8px solid #1a1a1a',
-          borderRadius: '20px',
-          boxShadow: '0 0 20px rgba(0,0,0,0.5)',
-        };
-      case 'tablet':
-        return {
-          ...baseStyle,
-          maxWidth: `${768 * (responsiveWidth / 100)}px`,
-          margin: '0 auto',
-          border: '12px solid #1a1a1a',
-          borderRadius: '12px',
-          boxShadow: '0 0 20px rgba(0,0,0,0.5)',
-        };
-      case 'desktop':
-        return {
-          ...baseStyle,
-          maxWidth: `${responsiveWidth}%`,
-          margin: '0 auto',
-        };
-      default:
-        return baseStyle;
+      case 'mobile': return 'device-frame-mobile';
+      case 'tablet': return 'device-frame-tablet';
+      case 'desktop': return 'device-frame-desktop';
+      default: return '';
     }
+  };
+
+  const getIframeStyle = (): React.CSSProperties => {
+    const base: React.CSSProperties = { width: '100%', height: '100%', border: 'none' };
+    if (deviceFrame === 'mobile') return { ...base, maxWidth: `${375 * (responsiveWidth / 100)}px` };
+    if (deviceFrame === 'tablet') return { ...base, maxWidth: `${768 * (responsiveWidth / 100)}px` };
+    if (deviceFrame === 'desktop') return { ...base, maxWidth: `${responsiveWidth}%` };
+    return base;
+  };
+
+  const getDevInstructions = () => {
+    const fw = detectedFramework;
+    if (fw === 'nextjs') return 'cd project && npm install && npm run dev';
+    if (fw === 'angular') return 'cd project && npm install && ng serve';
+    if (fw === 'astro') return 'cd project && npm install && npm run dev';
+    if (fw === 'vue') return 'cd project && npm install && npm run dev';
+    if (fw === 'svelte') return 'cd project && npm install && npm run dev';
+    if (fw === 'react' || fw === 'react-ts') return 'cd project && npm install && npm run dev';
+    return 'Open index.html in your browser';
   };
 
   return (
     <div className="live-preview">
       <div className="preview-header">
         <div className="preview-header-left">
-          <span>👁️ Live Preview</span>
+          <Eye size={14} />
+          <span>Preview</span>
           {projectType !== 'unknown' && (
-            <span className="project-type-badge">{projectType.toUpperCase()}</span>
+            <span className={`project-type-badge badge-${projectType}`}>
+              {FRAMEWORK_LABELS[projectType] || projectType}
+            </span>
           )}
-          {isLoading && <span className="loading-indicator">⏳ Bundling...</span>}
+          {isLoading && <span className="loading-indicator">Bundling...</span>}
         </div>
         <div className="preview-controls">
-          <div className="device-frame-controls">
-            <button
-              onClick={() => setDeviceFrame(deviceFrame === 'mobile' ? 'none' : 'mobile')}
-              className={deviceFrame === 'mobile' ? 'active' : ''}
-              title="Mobile frame"
-            >
-              <Smartphone size={16} />
+          <div className="device-frame-controls" role="group" aria-label="Device preview size">
+            <button onClick={() => setDeviceFrame(deviceFrame === 'mobile' ? 'none' : 'mobile')} className={deviceFrame === 'mobile' ? 'active' : ''} title="Mobile (375px)" aria-label="Toggle mobile preview" aria-pressed={deviceFrame === 'mobile'}>
+              <Smartphone size={13} />
             </button>
-            <button
-              onClick={() => setDeviceFrame(deviceFrame === 'tablet' ? 'none' : 'tablet')}
-              className={deviceFrame === 'tablet' ? 'active' : ''}
-              title="Tablet frame"
-            >
-              <Tablet size={16} />
+            <button onClick={() => setDeviceFrame(deviceFrame === 'tablet' ? 'none' : 'tablet')} className={deviceFrame === 'tablet' ? 'active' : ''} title="Tablet (768px)" aria-label="Toggle tablet preview" aria-pressed={deviceFrame === 'tablet'}>
+              <Tablet size={13} />
             </button>
-            <button
-              onClick={() => setDeviceFrame(deviceFrame === 'desktop' ? 'none' : 'desktop')}
-              className={deviceFrame === 'desktop' ? 'active' : ''}
-              title="Desktop frame"
-            >
-              <Monitor size={16} />
+            <button onClick={() => setDeviceFrame(deviceFrame === 'desktop' ? 'none' : 'desktop')} className={deviceFrame === 'desktop' ? 'active' : ''} title="Desktop" aria-label="Toggle desktop preview" aria-pressed={deviceFrame === 'desktop'}>
+              <Monitor size={13} />
             </button>
           </div>
-          
+
           {deviceFrame !== 'none' && (
             <div className="responsive-width-control">
-              <input
-                type="range"
-                min="50"
-                max="100"
-                value={responsiveWidth}
-                onChange={(e) => setResponsiveWidth(Number(e.target.value))}
-                title={`Width: ${responsiveWidth}%`}
-              />
-              <span>{responsiveWidth}%</span>
+              <input type="range" min="50" max="100" value={responsiveWidth} onChange={(e) => setResponsiveWidth(Number(e.target.value))} title={`${responsiveWidth}%`} />
+              <span className="width-label">{responsiveWidth}%</span>
             </div>
           )}
-          
-          <button onClick={handleRefresh} title="Refresh preview">
-            <RefreshCw size={16} />
-          </button>
-          <button onClick={handleOpenInNewTab} title="Open in new tab">
-            <ExternalLink size={16} />
-          </button>
+
+          <button onClick={handleRefresh} title="Refresh preview" aria-label="Refresh preview"><RefreshCw size={13} /></button>
+          <button onClick={handleOpenInNewTab} title="Open in new tab" aria-label="Open preview in new tab"><ExternalLink size={13} /></button>
         </div>
       </div>
 
-      {(error || bundlerErrors.length > 0) && (
-        <div className="preview-errors">
-          {error && <div className="error-message">❌ {error}</div>}
-          {bundlerErrors.map((err, i) => (
-            <div key={i} className="error-message">❌ {err}</div>
-          ))}
+      {/* Server framework notice */}
+      {isServerFramework && (
+        <div className="server-framework-banner">
+          <div className="banner-content">
+            <Terminal size={13} />
+            <span>This {FRAMEWORK_LABELS[projectType]} project requires a dev server for full interactivity.</span>
+            <button className="banner-toggle" onClick={() => setShowDevInstructions(!showDevInstructions)}>
+              {showDevInstructions ? 'Hide' : 'Run locally'}
+            </button>
+          </div>
+          {showDevInstructions && (
+            <div className="dev-instructions">
+              <p>Download the project and run:</p>
+              <code>{getDevInstructions()}</code>
+            </div>
+          )}
         </div>
       )}
 
+      {/* Errors */}
+      {(error || bundlerErrors.length > 0) && (
+        <div className="preview-errors" role="alert" aria-live="assertive">
+          {error && <div className="error-message">{error}</div>}
+          {bundlerErrors.map((err, i) => <div key={i} className="error-message">{err}</div>)}
+        </div>
+      )}
+
+      {/* Warnings */}
       {bundlerWarnings.length > 0 && (
         <div className="preview-warnings">
-          {bundlerWarnings.map((warn, i) => (
-            <div key={i} className="warning-message">⚠️ {warn}</div>
-          ))}
+          {bundlerWarnings.map((warn, i) => <div key={i} className="warning-message">{warn}</div>)}
         </div>
       )}
 
-      <div className="preview-container" style={deviceFrame !== 'none' ? { padding: '1rem' } : {}}>
-        <iframe 
-          ref={iframeRef} 
-          title="preview" 
+      <div className={`preview-container ${deviceFrame !== 'none' ? 'device-active' : ''}`}>
+        {isLoading && (
+          <div className="preview-skeleton-overlay">
+            <Loader2 size={20} className="spin" />
+            <span>Bundling preview...</span>
+          </div>
+        )}
+        <iframe
+          ref={iframeRef}
+          title="preview"
           sandbox="allow-scripts allow-same-origin"
-          style={getDeviceFrameStyles()}
+          className={getIframeClassName()}
+          style={getIframeStyle()}
         />
       </div>
     </div>

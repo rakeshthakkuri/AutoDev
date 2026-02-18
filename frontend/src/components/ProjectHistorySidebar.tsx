@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Trash2, Download, Search, Calendar, FileText, Grid, List } from 'lucide-react';
-import { listProjects, deleteProject, loadProject, ProjectData, clearAllProjects } from '../services/storage';
-import { GenerationStore } from '../store/generation';
+import { X, Trash2, Download, Search, Calendar, FileText, Grid, List, BookOpen } from 'lucide-react';
+import { listProjects, deleteProject, ProjectData, clearAllProjects } from '../services/storage';
 
 interface ProjectHistorySidebarProps {
   isOpen: boolean;
@@ -14,7 +13,6 @@ export default function ProjectHistorySidebar({ isOpen, onClose, onLoadProject }
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sortBy, setSortBy] = useState<'date' | 'name'>('date');
-  const { files, editedFiles } = GenerationStore();
 
   useEffect(() => {
     if (isOpen) {
@@ -89,7 +87,10 @@ export default function ProjectHistorySidebar({ isOpen, onClose, onLoadProject }
     <div className="project-history-sidebar-overlay" onClick={onClose}>
       <div className="project-history-sidebar" onClick={(e) => e.stopPropagation()}>
         <div className="sidebar-header">
-          <h2>📚 Project History</h2>
+          <h2 className="sidebar-title">
+            <BookOpen size={22} />
+            Project History
+          </h2>
           <button onClick={onClose} className="btn-close">
             <X size={20} />
           </button>
@@ -156,7 +157,11 @@ export default function ProjectHistorySidebar({ isOpen, onClose, onLoadProject }
                   
                   <div className="project-info">
                     <h3>{project.name || 'Untitled Project'}</h3>
-                    <p className="project-prompt">{project.prompt.substring(0, 100)}...</p>
+                    <p className="project-prompt">
+                    {project.prompt.length > 100
+                      ? `${project.prompt.substring(0, 100)}…`
+                      : project.prompt}
+                  </p>
                     <div className="project-meta">
                       <span>
                         <Calendar size={12} />

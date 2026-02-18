@@ -86,11 +86,11 @@ export default function LivePreview({ files }: LivePreviewProps) {
         const doc = iframe.contentDocument || iframe.contentWindow?.document;
         if (doc) {
           doc.open();
-          doc.write(`<html><body style="font-family:sans-serif;padding:2rem;color:#666;text-align:center">
-            <h2>Preview Unavailable</h2>
-            <p>No renderable content found. Generated files:</p>
-            <div style="margin-top:1rem;padding:1rem;background:#f5f5f5;border-radius:8px;text-align:left">
-              ${Object.keys(allFiles).map(f => `<div style="margin:.25rem 0">${escapeHtml(f)}</div>`).join('')}
+          doc.write(`<html><body style="font-family:system-ui,sans-serif;padding:2rem;color:#888;text-align:center;background:#0a0a0b">
+            <h2 style="color:#ccc;margin-bottom:1rem">Preview Unavailable</h2>
+            <p style="margin-bottom:1.5rem">No renderable content found. Generated files:</p>
+            <div style="padding:1rem;background:rgba(255,255,255,0.05);border-radius:12px;text-align:left;border:1px solid rgba(255,255,255,0.08)">
+              ${Object.keys(allFiles).map(f => `<div style="margin:.35rem 0;font-family:monospace;font-size:0.85rem;color:#a1a1aa">${escapeHtml(f)}</div>`).join('')}
             </div>
           </body></html>`);
           doc.close();
@@ -110,7 +110,7 @@ export default function LivePreview({ files }: LivePreviewProps) {
         } catch (writeErr) {
           const msg = writeErr instanceof Error ? writeErr.message : 'Failed to render preview';
           doc.open();
-          doc.write(`<!DOCTYPE html><html><body style="font-family:sans-serif;padding:1.5rem;color:#333"><h2 style="color:#c00">Preview Error</h2><p>${escapeHtml(msg)}</p></body></html>`);
+          doc.write(`<!DOCTYPE html><html><body style="font-family:system-ui;padding:2rem;color:#ccc;background:#0a0a0b"><h2 style="color:#ef4444">Preview Error</h2><p style="color:#a1a1aa">${escapeHtml(msg)}</p></body></html>`);
           doc.close();
           setError(msg);
         }
@@ -183,13 +183,13 @@ export default function LivePreview({ files }: LivePreviewProps) {
         <div className="preview-controls">
           <div className="device-frame-controls" role="group" aria-label="Device preview size">
             <button onClick={() => setDeviceFrame(deviceFrame === 'mobile' ? 'none' : 'mobile')} className={deviceFrame === 'mobile' ? 'active' : ''} title="Mobile (375px)" aria-label="Toggle mobile preview" aria-pressed={deviceFrame === 'mobile'}>
-              <Smartphone size={13} />
+              <Smartphone size={14} />
             </button>
             <button onClick={() => setDeviceFrame(deviceFrame === 'tablet' ? 'none' : 'tablet')} className={deviceFrame === 'tablet' ? 'active' : ''} title="Tablet (768px)" aria-label="Toggle tablet preview" aria-pressed={deviceFrame === 'tablet'}>
-              <Tablet size={13} />
+              <Tablet size={14} />
             </button>
             <button onClick={() => setDeviceFrame(deviceFrame === 'desktop' ? 'none' : 'desktop')} className={deviceFrame === 'desktop' ? 'active' : ''} title="Desktop" aria-label="Toggle desktop preview" aria-pressed={deviceFrame === 'desktop'}>
-              <Monitor size={13} />
+              <Monitor size={14} />
             </button>
           </div>
 
@@ -200,8 +200,8 @@ export default function LivePreview({ files }: LivePreviewProps) {
             </div>
           )}
 
-          <button onClick={handleRefresh} title="Refresh preview" aria-label="Refresh preview"><RefreshCw size={13} /></button>
-          <button onClick={handleOpenInNewTab} title="Open in new tab" aria-label="Open preview in new tab"><ExternalLink size={13} /></button>
+          <button onClick={handleRefresh} title="Refresh preview" aria-label="Refresh preview"><RefreshCw size={14} /></button>
+          <button onClick={handleOpenInNewTab} title="Open in new tab" aria-label="Open preview in new tab"><ExternalLink size={14} /></button>
         </div>
       </div>
 
@@ -209,7 +209,7 @@ export default function LivePreview({ files }: LivePreviewProps) {
       {isServerFramework && (
         <div className="server-framework-banner">
           <div className="banner-content">
-            <Terminal size={13} />
+            <Terminal size={14} />
             <span>This {FRAMEWORK_LABELS[projectType]} project requires a dev server for full interactivity.</span>
             <button className="banner-toggle" onClick={() => setShowDevInstructions(!showDevInstructions)}>
               {showDevInstructions ? 'Hide' : 'Run locally'}
@@ -242,7 +242,7 @@ export default function LivePreview({ files }: LivePreviewProps) {
       <div className={`preview-container ${deviceFrame !== 'none' ? 'device-active' : ''}`}>
         {isLoading && (
           <div className="preview-skeleton-overlay">
-            <Loader2 size={20} className="spin" />
+            <Loader2 size={24} className="spin" />
             <span>Bundling preview...</span>
           </div>
         )}

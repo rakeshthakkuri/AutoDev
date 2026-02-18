@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Wand2, ChevronDown, History, Cpu, FileCode, Atom, Triangle, Hexagon, Flame, Shield, Rocket } from 'lucide-react';
+import { Wand2, History, Cpu, FileCode, Atom, Triangle, Hexagon, Flame, Shield, Rocket } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { GenerationStore } from '../store/generation';
 
@@ -107,6 +107,17 @@ function saveToHistory(prompt: string) {
   } catch { /* ignore */ }
 }
 
+// ─── Prompt Strength ─────────────────────────────────────────────────────────
+
+function getPromptStrength(text: string): { level: string; label: string } {
+  const len = text.trim().length;
+  if (len === 0) return { level: '', label: '' };
+  if (len < 30) return { level: 'weak', label: 'Too short — add more detail' };
+  if (len < 60) return { level: 'fair', label: 'Fair — try being more specific' };
+  if (len < 200) return { level: 'good', label: 'Good prompt length' };
+  return { level: 'great', label: 'Very detailed prompt' };
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 interface PromptInputProps {
@@ -117,7 +128,6 @@ interface PromptInputProps {
 export default function PromptInput({ onGenerate, initialValue = '' }: PromptInputProps) {
   const [prompt, setPrompt] = useState(initialValue);
   const { generateProject, isGenerating, selectedFramework, selectedStyling, selectedComplexity, setSelectedFramework, setSelectedStyling, setSelectedComplexity } = GenerationStore();
-  const [showOptions, setShowOptions] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
 
@@ -155,9 +165,7 @@ export default function PromptInput({ onGenerate, initialValue = '' }: PromptInp
   const currentFramework = FRAMEWORK_OPTIONS.find(f => f.value === selectedFramework) || FRAMEWORK_OPTIONS[0];
   const templates = FRAMEWORK_TEMPLATES[selectedFramework] || FRAMEWORK_TEMPLATES.auto;
   const history = getPromptHistory();
-
-  const charCount = prompt.length;
-  const charClass = charCount >= 50 && charCount <= 500 ? 'good' : charCount > 0 && charCount < 50 ? 'short' : '';
+  const strength = getPromptStrength(prompt);
 
   return (
     <div className="prompt-input">
@@ -178,49 +186,37 @@ export default function PromptInput({ onGenerate, initialValue = '' }: PromptInp
               disabled={isGenerating}
               title={fw.label}
             >
-              <span className="chip-icon"><fw.Icon size={12} /></span>
+              <span className="chip-icon"><fw.Icon size={14} /></span>
               <span className="chip-label">{fw.label}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* ── Advanced Options Toggle ── */}
-      <button
-        type="button"
-        className="options-toggle"
-        onClick={() => setShowOptions(!showOptions)}
-        aria-expanded={showOptions}
-      >
-        <span>Options</span>
-        <ChevronDown size={12} className={showOptions ? 'rotated' : ''} />
-      </button>
-
-      {showOptions && (
-        <div className="advanced-options">
-          <div className="option-group">
-            <label>Styling</label>
-            <div className="option-chips">
-              {STYLING_OPTIONS.map(s => (
-                <button key={s.value} type="button" className={`option-chip ${selectedStyling === s.value ? 'active' : ''}`} onClick={() => setSelectedStyling(s.value)} disabled={isGenerating}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="option-group">
-            <label>Complexity</label>
-            <div className="option-chips">
-              {COMPLEXITY_OPTIONS.map(c => (
-                <button key={c.value} type="button" className={`option-chip ${selectedComplexity === c.value ? 'active' : ''}`} onClick={() => setSelectedComplexity(c.value)} disabled={isGenerating}>
-                  {c.label}
-                  <span className="chip-desc">{c.desc}</span>
-                </button>
-              ))}
-            </div>
+      {/* ── Styling & Complexity (always visible) ── */}
+      <div className="options-row">
+        <div className="option-group">
+          <label>Styling</label>
+          <div className="option-chips">
+            {STYLING_OPTIONS.map(s => (
+              <button key={s.value} type="button" className={`option-chip ${selectedStyling === s.value ? 'active' : ''}`} onClick={() => setSelectedStyling(s.value)} disabled={isGenerating}>
+                {s.label}
+              </button>
+            ))}
           </div>
         </div>
-      )}
+        <div className="option-group">
+          <label>Complexity</label>
+          <div className="option-chips">
+            {COMPLEXITY_OPTIONS.map(c => (
+              <button key={c.value} type="button" className={`option-chip ${selectedComplexity === c.value ? 'active' : ''}`} onClick={() => setSelectedComplexity(c.value)} disabled={isGenerating}>
+                {c.label}
+                <span className="chip-desc">{c.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {/* ── Prompt Textarea ── */}
       <textarea
@@ -233,17 +229,15 @@ export default function PromptInput({ onGenerate, initialValue = '' }: PromptInp
         aria-label="Project description"
       />
 
-      {/* Character count */}
-      <div className={`char-count ${charClass}`}>
-        {charCount > 0 && (
-          <>
-            {charCount} character{charCount !== 1 ? 's' : ''}
-            {charCount < 50 && ' — try adding more detail'}
-            {charCount >= 50 && charCount <= 500 && ' — good length'}
-            {charCount > 500 && ' — quite detailed'}
-          </>
-        )}
-      </div>
+      {/* Prompt strength indicator */}
+      {strength.level && (
+        <div className="prompt-strength">
+          <div className="prompt-strength-bar">
+            <div className={`prompt-strength-fill ${strength.level}`} />
+          </div>
+          <span className={`prompt-strength-label ${strength.level}`}>{strength.label}</span>
+        </div>
+      )}
 
       <div className="prompt-actions">
         <button
@@ -252,7 +246,7 @@ export default function PromptInput({ onGenerate, initialValue = '' }: PromptInp
           disabled={isGenerating || !prompt.trim()}
           aria-label="Generate project"
         >
-          <Wand2 size={16} />
+          <Wand2 size={18} />
           {isGenerating ? 'Generating...' : 'Generate Project'}
         </button>
         <span className="shortcut-hint">{navigator.platform.toUpperCase().includes('MAC') ? '⌘' : 'Ctrl'} + Enter</span>
@@ -267,7 +261,7 @@ export default function PromptInput({ onGenerate, initialValue = '' }: PromptInp
               aria-label="Prompt history"
               aria-expanded={showHistory}
             >
-              <History size={12} />
+              <History size={13} />
               History
             </button>
             {showHistory && (

@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Code, Zap, Rocket, ArrowRight, Github, Atom, Hexagon, Flame, Triangle, Shield, FileCode } from 'lucide-react';
+import {
+  Sparkles, Code, Zap, Rocket, ArrowRight, Github,
+  Atom, Hexagon, Flame, Triangle, Shield, FileCode,
+  MessageSquare, Eye
+} from 'lucide-react';
 import Navbar from './Navbar';
 import ProjectHistorySidebar from './ProjectHistorySidebar';
 import { GenerationStore } from '../store/generation';
@@ -88,6 +92,11 @@ function TypewriterAnimation() {
   return (
     <div className="typewriter-container">
       <div className="typewriter-header">
+        <div className="typewriter-dots">
+          <div className="typewriter-dot" />
+          <div className="typewriter-dot" />
+          <div className="typewriter-dot" />
+        </div>
         <span className="typewriter-filename">App.jsx</span>
       </div>
       <pre className="typewriter-body">
@@ -119,9 +128,15 @@ export default function LandingPage() {
   const loadProjectState = GenerationStore((s) => s.loadProject);
 
   const features = [
-    { icon: <Code size={20} />, title: 'Multi-Framework AI', description: 'Generate React, Vue, Svelte, Next.js, Angular, Astro, and more with framework-specific best practices' },
-    { icon: <Zap size={20} />, title: 'Streaming Generation', description: 'Watch code appear in real-time as AI writes each file with live syntax highlighting' },
-    { icon: <Rocket size={20} />, title: 'Instant Preview', description: 'See your project come to life with automatic bundling and live preview in the browser' },
+    { icon: <Code size={22} />, title: 'Multi-Framework AI', description: 'Generate React, Vue, Svelte, Next.js, Angular, Astro, and more with framework-specific best practices' },
+    { icon: <Zap size={22} />, title: 'Streaming Generation', description: 'Watch code appear in real-time as AI writes each file with live syntax highlighting' },
+    { icon: <Rocket size={22} />, title: 'Instant Preview', description: 'See your project come to life with automatic bundling and live preview in the browser' },
+  ];
+
+  const steps = [
+    { icon: <MessageSquare size={22} />, title: 'Describe', description: 'Tell the AI what you want to build using natural language' },
+    { icon: <Sparkles size={22} />, title: 'Generate', description: 'Watch as AI creates your complete project file by file in real-time' },
+    { icon: <Eye size={22} />, title: 'Preview & Edit', description: 'See a live preview, edit the code, and download your project' },
   ];
 
   const handleGetStarted = () => navigate('/generate');
@@ -140,62 +155,101 @@ export default function LandingPage() {
       <ProjectHistorySidebar isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} onLoadProject={handleLoadProject} />
 
       <div className="landing-page">
+        {/* Hero - Two Column */}
         <div className="landing-hero">
-          <div className="hero-content">
-            <div className="hero-badge">
-              <Sparkles size={14} />
-              <span>Powered by AI</span>
-            </div>
+          <div className="hero-grid">
+            <div className="hero-content">
+              <div className="hero-badge">
+                <Sparkles size={14} />
+                <span>Powered by AI</span>
+              </div>
 
-            <h1 className="hero-title">
-              Build <span className="gradient-text">Web Projects</span>
-              <br />
-              with Natural Language
-            </h1>
+              <h1 className="hero-title">
+                Build <span className="gradient-text">Web Projects</span>
+                <br />
+                with Natural Language
+              </h1>
 
-            <p className="hero-description">
-              Describe what you want to build, and watch as AI generates a complete,
-              working web application in seconds. Supports 8 frameworks out of the box.
-            </p>
+              <p className="hero-description">
+                Describe what you want to build, and watch as AI generates a complete,
+                working web application in seconds. Supports 8 frameworks out of the box.
+              </p>
 
-            <div className="hero-actions">
-              <button onClick={handleGetStarted} className="btn-primary-large">
-                Get Started
-                <ArrowRight size={18} />
-              </button>
-              <a
-                href="https://github.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-secondary-large"
-              >
-                <Github size={18} />
-                View on GitHub
-              </a>
-            </div>
+              <div className="hero-actions">
+                <button onClick={handleGetStarted} className="btn-primary-large">
+                  Get Started
+                  <ArrowRight size={18} />
+                </button>
+                <a
+                  href="https://github.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-secondary-large"
+                >
+                  <Github size={18} />
+                  View on GitHub
+                </a>
+              </div>
 
-            {/* Framework Showcase */}
-            <div className="frameworks-showcase">
-              {FRAMEWORKS.map((fw) => (
-                <div key={fw.name} className="framework-showcase-item">
-                  <div className="framework-showcase-icon">
-                    <fw.Icon size={18} color={fw.color} />
+              {/* Framework Showcase */}
+              <div className="frameworks-showcase">
+                {FRAMEWORKS.map((fw) => (
+                  <div key={fw.name} className="framework-showcase-item">
+                    <div className="framework-showcase-icon">
+                      <fw.Icon size={20} color={fw.color} />
+                    </div>
+                    <span className="framework-showcase-name">{fw.name}</span>
                   </div>
-                  <span className="framework-showcase-name">{fw.name}</span>
-                </div>
-              ))}
+                ))}
+              </div>
+            </div>
+
+            {/* Typewriter Animation */}
+            <div className="hero-visual">
+              <TypewriterAnimation />
             </div>
           </div>
         </div>
 
-        {/* Typewriter Animation */}
-        <div className="typewriter-wrapper">
-          <TypewriterAnimation />
+        {/* Stats Strip */}
+        <div className="stats-strip">
+          <div className="stat-item">
+            <span className="stat-value">8</span>
+            <span className="stat-label">Frameworks Supported</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-value">Real-time</span>
+            <span className="stat-label">Streaming Generation</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-value">Instant</span>
+            <span className="stat-label">Live Preview</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-value">1-Click</span>
+            <span className="stat-label">ZIP Download</span>
+          </div>
+        </div>
+
+        {/* How it Works */}
+        <div className="how-it-works">
+          <h2 className="section-title">How It Works</h2>
+          <p className="section-subtitle">Three simple steps to go from idea to working code</p>
+          <div className="steps-grid">
+            {steps.map((step, index) => (
+              <div key={index} className="step-card">
+                <div className="step-number">{index + 1}</div>
+                <h3>{step.title}</h3>
+                <p>{step.description}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Features */}
         <div className="landing-features">
           <h2 className="section-title">Why Choose AI Code Generator?</h2>
+          <p className="section-subtitle">Everything you need to go from prompt to production-ready code</p>
           <div className="features-grid">
             {features.map((feature, index) => (
               <div key={index} className="feature-card">
@@ -210,6 +264,7 @@ export default function LandingPage() {
         {/* Framework-Specific Examples */}
         <div className="landing-examples">
           <h2 className="section-title">Try These Examples</h2>
+          <p className="section-subtitle">Click any example to jump straight into generation</p>
           <div className="examples-grid">
             {FRAMEWORK_EXAMPLES.map((example, index) => (
               <div
@@ -218,13 +273,13 @@ export default function LandingPage() {
                 onClick={() => navigate(`/generate?prompt=${encodeURIComponent(example.prompt)}`)}
               >
                 <div className="example-icon">
-                  <example.Icon size={16} />
+                  <example.Icon size={18} />
                 </div>
                 <div className="example-card-body">
                   <div className="example-framework-label">{example.framework}</div>
                   <p>{example.prompt}</p>
                 </div>
-                <ArrowRight size={14} className="example-arrow" />
+                <ArrowRight size={16} className="example-arrow" />
               </div>
             ))}
           </div>

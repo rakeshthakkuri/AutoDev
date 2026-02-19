@@ -2,21 +2,18 @@
 // Agent Fixer — LLM-powered self-healing for generated code
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import path from 'path';
 import { generateFix, getMaxTokens } from './llm.js';
 import { CodeValidator } from './validator.js';
-import winston from 'winston';
-
-const logger = winston.createLogger({
-    level: 'info',
-    format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
-    transports: [new winston.transports.Console({ format: winston.format.simple() })]
-});
-
-const MAX_FIX_ATTEMPTS = 2;
+import logger from './logger.js';
+import config from '../config.js';
 
 export class AgentFixer {
-    constructor() {
-        this.validator = new CodeValidator();
+    /**
+     * @param {import('./validator.js').CodeValidator} [validator] - Optional shared validator instance; if not provided, creates one.
+     */
+    constructor(validator) {
+        this.validator = validator || new CodeValidator();
     }
 
     /**
@@ -29,23 +26,30 @@ export class AgentFixer {
      * @param {string[]} params.warnings - Validation warnings
      * @param {string} params.userPrompt - Original user prompt for context
      * @param {Record<string, string>} params.contextFiles - Other generated files for reference
+     * @param {Array<{ path: string, content: string }>} [params.importingFiles] - Files that import this file (for default-export fixes)
+     * @param {string} params.framework - Project framework (e.g. "vanilla-js", "react")
      * @param {function} [params.onFixAttempt] - Callback: ({ path, attempt, totalAttempts, errors }) => void
      * @returns {Promise<{ code: string, validation: object, fixed: boolean, attempts: number }>}
      */
-    async fixFileWithFeedback({ code, filePath, errors, warnings, userPrompt, contextFiles, onFixAttempt }) {
+    async fixFileWithFeedback({ code, filePath, errors, warnings, userPrompt, contextFiles, importingFiles, framework, onFixAttempt }) {
         let currentCode = code;
         let lastValidation = null;
         let currentErrors = [...errors];
         let currentWarnings = [...(warnings || [])];
 
-        for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
-            logger.info(`Agent fix attempt ${attempt}/${MAX_FIX_ATTEMPTS} for ${filePath} — errors: ${currentErrors.length}`);
+        const isTruncationError = currentErrors.some(e =>
+            e.toLowerCase().includes('truncat') || e.toLowerCase().includes('unterminated')
+        );
+        const maxAttempts = isTruncationError ? config.agent.maxFixAttemptsTruncation : config.agent.maxFixAttempts;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            logger.info(`Agent fix attempt ${attempt}/${maxAttempts} for ${filePath} — errors: ${currentErrors.length}`);
 
             // Notify frontend about the fix attempt
             onFixAttempt?.({
                 path: filePath,
                 attempt,
-                totalAttempts: MAX_FIX_ATTEMPTS,
+                totalAttempts: maxAttempts,
                 errors: currentErrors,
             });
 
@@ -56,18 +60,29 @@ export class AgentFixer {
                 warnings: currentWarnings,
                 userPrompt,
                 contextFiles,
+                importingFiles,
             });
 
             try {
                 // If errors mention truncation, give the LLM more room to output a full file
-                const isTruncated = currentErrors.some(e =>
-                    e.toLowerCase().includes('truncat') || e.toLowerCase().includes('unterminated')
-                );
-                const maxTokens = isTruncated
-                    ? Math.max(getMaxTokens(filePath, 'advanced'), 8192)
+                const providerConfig = config.llm[config.llm.provider];
+                const maxTokens = isTruncationError
+                    ? Math.max(getMaxTokens(filePath, 'advanced'), providerConfig.maxTokensLarge)
                     : getMaxTokens(filePath, 'intermediate');
 
-                const fixedCode = await generateFix(fixPrompt, { maxTokens });
+                let fixedCode = null;
+                const maxLlmRetries = 2;
+                for (let r = 0; r < maxLlmRetries; r++) {
+                    try {
+                        fixedCode = await generateFix(fixPrompt, { maxTokens });
+                        break;
+                    } catch (e) {
+                        logger.warn(`generateFix retry ${r + 1}/${maxLlmRetries} for ${filePath}: ${e.message}`);
+                        if (r < maxLlmRetries - 1) {
+                            await new Promise(resolve => setTimeout(resolve, 1000 + r * 1000));
+                        }
+                    }
+                }
 
                 if (!fixedCode || fixedCode.trim().length < 10) {
                     logger.warn(`Agent fix returned empty/short result for ${filePath}, keeping original`);
@@ -78,7 +93,7 @@ export class AgentFixer {
                 const cleanedCode = this._cleanFixResponse(fixedCode, filePath);
 
                 // Re-validate
-                const validation = this.validator.validateFile(cleanedCode, filePath);
+                const validation = this.validator.validateFile(cleanedCode, filePath, framework);
                 lastValidation = validation;
 
                 const finalCode = validation.fixedCode || cleanedCode;
@@ -106,12 +121,12 @@ export class AgentFixer {
         }
 
         // Exhausted all fix attempts — return the best we have
-        logger.warn(`Agent fix exhausted ${MAX_FIX_ATTEMPTS} attempts for ${filePath}`);
+        logger.warn(`Agent fix exhausted ${maxAttempts} attempts for ${filePath}`);
         return {
             code: currentCode,
-            validation: lastValidation || this.validator.validateFile(currentCode, filePath),
+            validation: lastValidation || this.validator.validateFile(currentCode, filePath, framework),
             fixed: false,
-            attempts: MAX_FIX_ATTEMPTS,
+            attempts: maxAttempts,
         };
     }
 
@@ -122,10 +137,11 @@ export class AgentFixer {
      * @param {Record<string, string>} params.files - All generated files
      * @param {string[]} params.structureErrors - Cross-file validation warnings
      * @param {string} params.userPrompt - Original user prompt
+     * @param {string} params.framework - Project framework
      * @param {function} [params.onFixAttempt] - Callback for fix progress
      * @returns {Promise<Record<string, { code: string, validation: object }>>} - Map of fixed files
      */
-    async fixCrossFileIssues({ files, structureErrors, userPrompt, onFixAttempt }) {
+    async fixCrossFileIssues({ files, structureErrors, userPrompt, framework, onFixAttempt }) {
         if (!structureErrors || structureErrors.length === 0) return {};
 
         const fixedFiles = {};
@@ -144,9 +160,24 @@ export class AgentFixer {
             }
         }
 
+        // For "imported as default but has no default export" we need to show the importing file(s) so the agent knows what to add
+        const getImportingFiles = (targetPath) => {
+            const baseName = path.basename(targetPath, path.extname(targetPath));
+            const escaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const defaultImportRe = new RegExp(`import\\s+\\w+\\s+from\\s+['"][^'"]*${escaped}['"]`, 'i');
+            return Object.entries(files)
+                .filter(([p, c]) => p !== targetPath && typeof c === 'string' && defaultImportRe.test(c))
+                .map(([p, c]) => ({ path: p, content: c }));
+        };
+
         // Fix each affected file
         for (const [filePath, fileErrors] of Object.entries(errorsByFile)) {
             logger.info(`Agent fixing cross-file issues in ${filePath}: ${fileErrors.length} issue(s)`);
+
+            const hasDefaultExportError = fileErrors.some(e =>
+                /imported as default|no default export/i.test(e)
+            );
+            const importingFiles = hasDefaultExportError ? getImportingFiles(filePath) : undefined;
 
             const result = await this.fixFileWithFeedback({
                 code: files[filePath],
@@ -155,6 +186,8 @@ export class AgentFixer {
                 warnings: [],
                 userPrompt,
                 contextFiles: files,
+                importingFiles,
+                framework,
                 onFixAttempt,
             });
 
@@ -172,9 +205,12 @@ export class AgentFixer {
     /**
      * Build the repair prompt for the LLM.
      */
-    _buildFixPrompt({ code, filePath, errors, warnings, userPrompt, contextFiles }) {
+    _buildFixPrompt({ code, filePath, errors, warnings, userPrompt, contextFiles, importingFiles }) {
         const isTruncated = errors.some(e =>
             e.toLowerCase().includes('truncat') || e.toLowerCase().includes('unterminated')
+        );
+        const isDefaultExportError = errors.some(e =>
+            /imported as default|no default export/i.test(e)
         );
 
         let prompt = `The following file was generated for a web project but has validation errors that need to be fixed.
@@ -201,19 +237,29 @@ ${warnings.map((w, i) => `${i + 1}. ${w}`).join('\n')}
 `;
         }
 
+        // When fixing missing default export, show the importing file(s) so the agent knows what export to add
+        if (isDefaultExportError && importingFiles && importingFiles.length > 0) {
+            prompt += `\nFILES THAT IMPORT THIS FILE (add the default export they expect — e.g. export default ComponentName):\n`;
+            for (const { path: p, content: c } of importingFiles) {
+                const snippet = (c || '').substring(0, 1200);
+                prompt += `--- ${p} ---\n${snippet}\n${(c || '').length > 1200 ? '// ... truncated\n' : ''}\n`;
+            }
+        }
+
         prompt += `\nCURRENT CODE:\n\`\`\`\n${code}\n\`\`\`\n`;
 
         // Add context of other files for import resolution
         if (contextFiles && Object.keys(contextFiles).length > 0) {
+            const excludePaths = new Set([filePath, ...(importingFiles || []).map(f => f.path)]);
             const contextEntries = Object.entries(contextFiles)
-                .filter(([p]) => p !== filePath)
+                .filter(([p]) => !excludePaths.has(p))
                 .slice(0, 6); // Limit context to 6 files
 
             if (contextEntries.length > 0) {
                 prompt += `\nOTHER PROJECT FILES (for import/reference resolution):\n`;
-                for (const [path, content] of contextEntries) {
+                for (const [p, content] of contextEntries) {
                     const truncated = (content || '').substring(0, 800);
-                    prompt += `--- ${path} ---\n${truncated}\n${content && content.length > 800 ? '// ... truncated\n' : ''}\n`;
+                    prompt += `--- ${p} ---\n${truncated}\n${content && content.length > 800 ? '// ... truncated\n' : ''}\n`;
                 }
             }
         }

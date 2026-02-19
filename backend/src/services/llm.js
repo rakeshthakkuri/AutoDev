@@ -1,20 +1,13 @@
-import Anthropic from '@anthropic-ai/sdk';
-import dotenv from 'dotenv';
+import { GoogleGenAI } from '@google/genai';
+import config from '../config.js';
+import logger from './logger.js';
 
-dotenv.config();
+let ai = null;
 
-let anthropic = null;
-
-// ─── Supported Frameworks ────────────────────────────────────────────────────
-export const FRAMEWORKS = [
-    'vanilla-js', 'react', 'react-ts', 'nextjs', 'vue', 'svelte', 'angular', 'astro'
-];
-
-export const STYLING_OPTIONS = [
-    'tailwind', 'plain-css', 'css-modules', 'styled-components', 'scss'
-];
-
-export const COMPLEXITY_LEVELS = ['simple', 'intermediate', 'advanced'];
+// ─── Supported Frameworks (re-export from config as single source of truth) ───
+export const FRAMEWORKS = config.frameworks;
+export const STYLING_OPTIONS = config.stylingOptions;
+export const COMPLEXITY_LEVELS = config.complexityLevels;
 
 export const PROJECT_TYPES = [
     'landing-page', 'web-app', 'dashboard', 'portfolio', 'ecommerce',
@@ -22,29 +15,34 @@ export const PROJECT_TYPES = [
 ];
 
 // ─── Analyzer Prompt ─────────────────────────────────────────────────────────
-export const ANALYZER_PROMPT = `Analyze this web project request and reply with ONLY one JSON object. No other text.
+export const ANALYZER_PROMPT = `Analyze the user's web project request and provide a detailed technical specification.
+CRITICAL: You MUST output ONLY a valid JSON object. 
+- NO markdown code fences (e.g., NO \`\`\`json).
+- NO conversational filler or explanations.
+- NO text before or after the JSON object.
 
 User request: "{prompt}"
 {frameworkHint}{stylingHint}
 
-Reply with only this JSON (use exactly these keys):
-{"projectType":"landing-page","features":["feature1","feature2"],"styling":"modern","complexity":"simple","framework":"vanilla-js","stylingFramework":"plain-css","colorScheme":"","layout":"","description":""}
-
-Rules:
-- projectType must be one of: landing-page, web-app, dashboard, portfolio, ecommerce, blog, documentation, saas, social, admin-panel, crm, game
-- styling must be one of: modern, minimal, colorful, professional, elegant, creative, dark, glassmorphism, neumorphism
-- complexity must be one of: simple, intermediate, advanced
-- framework must be one of: vanilla-js, react, react-ts, nextjs, vue, svelte, angular, astro
-- stylingFramework must be one of: tailwind, plain-css, css-modules, styled-components, scss
-- description: 1-2 sentence summary of what will be built
-- If user mentions React/Next/Vue/Svelte/Angular/Astro, use that framework
-- If user mentions TypeScript with React, use react-ts
-- If user mentions Tailwind, set stylingFramework to tailwind
-- For complex apps (dashboards, SaaS, CRM, ecommerce), prefer react-ts or nextjs unless user specifies otherwise
-- For simple sites (landing pages, portfolios, blogs), vanilla-js is fine unless user specifies otherwise`;
+REQUIRED JSON STRUCTURE (use exactly these keys):
+{
+  "projectType": "e.g., landing-page, dashboard, etc.",
+  "features": ["feature1", "feature2"],
+  "styling": "e.g., modern, minimal, brutalist",
+  "complexity": "simple" | "intermediate" | "advanced",
+  "framework": "vanilla-js" | "react" | "react-ts" | "nextjs" | "vue" | "svelte" | "angular" | "astro",
+  "stylingFramework": "tailwind" | "plain-css" | "css-modules" | "styled-components" | "scss",
+  "colorScheme": "Description of colors",
+  "layout": "Description of layout",
+  "description": "Short summary"
+}`;
 
 // ─── Planner Prompt ──────────────────────────────────────────────────────────
-export const PLANNER_PROMPT = `Plan the file structure for this web project. Reply with ONLY one JSON object. No other text.
+export const PLANNER_PROMPT = `Plan the complete file structure for this web project.
+CRITICAL: You MUST output ONLY a valid JSON object.
+- NO markdown code fences.
+- NO conversational filler.
+- NO text before or after the JSON.
 
 Requirements: {requirements}
 Project type: {projectType}
@@ -52,245 +50,366 @@ Framework: {framework}
 Styling: {stylingFramework}
 Complexity: {complexity}
 
-Reply with only this JSON:
-{"files":[{"path":"...","purpose":"..."}],"techStack":["..."],"designSystem":{"primaryColor":"#4f46e5","fontFamily":"Inter"}}
+REQUIRED JSON STRUCTURE:
+{
+  "files": [
+    {
+      "path": "path/to/file.ext",
+      "purpose": "What this file does"
+    }
+  ],
+  "techStack": ["List of technologies"],
+  "designSystem": {
+    "primaryColor": "hex code",
+    "fontFamily": "font name"
+  }
+}
 
 FRAMEWORK-SPECIFIC FILE STRUCTURES:
-
-vanilla-js:
-- index.html, styles.css, script.js
-- For intermediate+: add components/ folder, utils.js
-
-react:
-- index.html, src/App.jsx, src/main.jsx, src/index.css
-- For intermediate+: src/components/*.jsx, src/hooks/, src/utils/
-- package.json with react, react-dom dependencies
-
-react-ts:
-- index.html, src/App.tsx, src/main.tsx, src/index.css
-- For intermediate+: src/components/*.tsx, src/hooks/, src/types/
-- package.json, tsconfig.json
-
-nextjs:
-- app/layout.tsx, app/page.tsx, app/globals.css
-- For intermediate+: app/components/*.tsx, app/api/ routes, app/lib/
-- package.json, next.config.js, tailwind.config.js (if tailwind), tsconfig.json
-
-vue:
-- index.html, src/App.vue, src/main.js, src/style.css
-- For intermediate+: src/components/*.vue, src/composables/
-- package.json, vite.config.js
-
-svelte:
-- src/App.svelte, src/main.js, src/app.css
-- For intermediate+: src/lib/components/*.svelte, src/lib/stores/
-- package.json, vite.config.js, svelte.config.js
-
-angular:
-- src/app/app.component.ts, src/app/app.component.html, src/app/app.component.css
-- src/main.ts, src/index.html, src/styles.css
-- For intermediate+: src/app/components/, src/app/services/
-- package.json, angular.json, tsconfig.json
-
-astro:
-- src/pages/index.astro, src/layouts/Layout.astro, src/styles/global.css
-- For intermediate+: src/components/*.astro, src/content/
-- package.json, astro.config.mjs
+- vanilla-js: index.html, styles.css, script.js (MUST link them in index.html)
+- react: index.html, src/App.jsx, src/main.jsx, src/index.css (index.html MUST have #root and link to main.jsx)
+- react-ts: index.html, src/App.tsx, src/main.tsx, src/index.css (index.html MUST have #root and link to main.tsx)
+- nextjs: app/layout.tsx, app/page.tsx, app/globals.css
+- vue: index.html, src/App.vue, src/main.js, src/style.css
+- svelte: src/App.svelte, src/main.js, src/app.css
+- angular: src/app/app.component.ts, src/app/app.component.html, src/app/app.component.css, src/main.ts, src/index.html, src/styles.css
+- astro: src/pages/index.astro, src/layouts/Layout.astro, src/styles/global.css
 
 RULES:
-- Always include the entry point file for the framework
-- For tailwind styling, include tailwind.config.js
-- For TypeScript frameworks, include tsconfig.json
-- For package-based frameworks (everything except vanilla-js), include package.json
-- Limit to 3-8 files for simple, 5-12 for intermediate, 8-20 for advanced
-- Each file must have a clear purpose`;
+- Include all necessary config files (package.json, tailwind.config.js, tsconfig.json) for the chosen framework.
+- Ensure all files have a clear purpose.
+- Output ONLY the JSON object. You may wrap it in a markdown code block; we will strip the fence and parse.`;
 
 // ─── Framework-Specific Code Generator Prompts ──────────────────────────────
 const FRAMEWORK_PROMPTS = {
     'vanilla-js': `Generate complete, production-ready code for: {file_path}
 Project type: {projectType} | Style: {styling} | User wants: {userPrompt}
 
-RULES:
-- Output ONLY the raw code. No markdown, no explanations, no code fences.
-- For HTML: Complete <!DOCTYPE html> structure, semantic HTML5, proper meta tags, link to CSS/JS files
-- For CSS: Modern responsive styles, CSS custom properties, mobile-first, smooth transitions, good typography
-- For JS: Clean ES6+, proper event handling, DOMContentLoaded, modular functions
-- Make it visually polished and professional - not a skeleton/placeholder
-- Include real content relevant to the project description, not Lorem Ipsum
-- Use Inter or system font stack`,
+MANDATORY OUTPUT FORMAT:
+- Output ONLY the raw code. 
+- NO markdown code fences (e.g., NO \`\`\`html).
+- NO explanations or conversational text.
+- NO backticks around URLs (e.g., use "https://..." NOT \`https://...\`).
+- NO backticks around attribute values.
+
+CORE RULES:
+- For index.html: 
+    - Complete <!DOCTYPE html> structure.
+    - MUST include <link rel="stylesheet" href="styles.css"> in <head>.
+    - MUST include <script src="script.js" defer></script> before </body>.
+    - Use semantic HTML5 (header, nav, main, section, footer).
+    - Include high-quality Unsplash images (https://images.unsplash.com/...).
+- For styles.css: Modern responsive design, mobile-first, using CSS variables.
+- For script.js: Clean ES6+, modular functions, DOMContentLoaded.
+- Accessibility: Use proper ARIA labels and semantic structure.`,
 
     'react': `Generate complete, production-ready React (JSX) code for: {file_path}
 Project type: {projectType} | Style: {styling} | User wants: {userPrompt}
 
-RULES:
-- Output ONLY the raw code. No markdown, no explanations, no code fences.
-- Use functional components with hooks (useState, useEffect, useCallback, useMemo)
-- Use proper JSX syntax: className, htmlFor, onClick, onChange
-- Export components as default exports
-- Import React hooks from 'react'
-- For App.jsx: import child components using relative paths (e.g., './components/Header')
-- For CSS: use standard CSS or inline styles
-- For index.html: include <div id="root"> and script tags
-- For main.jsx: import ReactDOM and render App into #root
-- Make it visually polished with real content - not placeholder text
-- Handle state properly, avoid prop drilling for complex apps`,
+MANDATORY OUTPUT FORMAT:
+- Output ONLY the raw code.
+- NO markdown code fences.
+- NO explanations or conversational text.
+- NO backticks around URLs or imports.
+
+CORE RULES:
+- Use functional components with hooks (useState, useEffect, useCallback, useMemo).
+- Use proper JSX syntax: className, htmlFor, onClick, onChange.
+- Export components as default exports.
+- Icons: Use inline SVGs or 'lucide-react' components if suitable.
+- Images: Use relevant, high-quality Unsplash URLs.
+- Accessibility: Use semantic HTML and aria-labels.
+- For App.jsx: Import child components using relative paths (e.g., './components/Header').
+- Make it visually polished with real content - avoid "Lorem Ipsum".
+- Handle state properly; avoid prop drilling for complex apps.`,
 
     'react-ts': `Generate complete, production-ready React TypeScript code for: {file_path}
 Project type: {projectType} | Style: {styling} | User wants: {userPrompt}
 
-RULES:
-- Output ONLY the raw code. No markdown, no explanations, no code fences.
-- Use TypeScript with proper type annotations and interfaces
-- Use functional components with typed props: React.FC<Props> or explicit return types
-- Use proper hooks typing: useState<Type>, useRef<HTMLElement>
-- Export components as default exports
-- For .tsx files: import React from 'react'
-- For App.tsx: import child components using relative paths
-- For tsconfig.json: include strict mode, jsx: react-jsx
-- For package.json: include @types/react, @types/react-dom, typescript
-- Make it visually polished with real content`,
+MANDATORY OUTPUT FORMAT:
+- Output ONLY the raw code.
+- NO markdown code fences.
+- NO explanations.
+- NO backticks around URLs or imports.
+
+CORE RULES:
+- Use TypeScript with strict type annotations and interfaces.
+- Use functional components with typed props: interface Props { ... } and React.FC<Props>.
+- Use proper hooks typing: useState<Type>, useRef<HTMLElement>.
+- Icons/Images: Use high-quality assets (SVGs, Unsplash).
+- Export components as default exports.
+- For App.tsx: Import child components using relative paths.
+- For tsconfig.json: Include strict mode, jsx: react-jsx.
+- Make it visually polished with real content.`,
 
     'nextjs': `Generate complete, production-ready Next.js 14+ (App Router) code for: {file_path}
 Project type: {projectType} | Style: {styling} | User wants: {userPrompt}
 
-RULES:
-- Output ONLY the raw code. No markdown, no explanations, no code fences.
-- Use the App Router (app/ directory), NOT pages/ router
-- For layout.tsx: export metadata, use children prop, include html/body tags
-- For page.tsx: export default function, this is a Server Component by default
-- Add 'use client' directive ONLY for components that use hooks/interactivity
-- Use TypeScript throughout
-- For API routes: use app/api/route.ts with GET/POST exports using NextRequest/NextResponse
-- For tailwind: use utility classes extensively, include tailwind.config.js
-- For next.config.js: use module.exports with appropriate settings
-- For package.json: include next, react, react-dom as dependencies
-- Make it visually polished with real content`,
+MANDATORY OUTPUT FORMAT:
+- Output ONLY the raw code.
+- NO markdown code fences.
+- NO explanations.
+- NO backticks around URLs or imports.
+
+CORE RULES:
+- Use the App Router (app/ directory), NOT pages/ router.
+- Server Components by default; add 'use client' ONLY if hooks/interactivity are needed.
+- For layout.tsx: Export metadata, use children prop, include html/body tags.
+- Use Next.js Image component (<Image />) for optimized images where possible.
+- For API routes: Use app/api/route.ts with named exports (GET, POST).
+- Use TypeScript throughout with proper interfaces.
+- For tailwind: Use utility classes extensively.
+- Make it visually polished with real, high-quality content.`,
 
     'vue': `Generate complete, production-ready Vue 3 code for: {file_path}
 Project type: {projectType} | Style: {styling} | User wants: {userPrompt}
 
-RULES:
-- Output ONLY the raw code. No markdown, no explanations, no code fences.
-- Use Vue 3 Composition API with <script setup> syntax
-- .vue files must have <template>, <script setup>, and <style scoped> sections
-- Use ref(), reactive(), computed(), watch(), onMounted() from 'vue'
-- Use defineProps(), defineEmits() for component communication
-- For main.js: import createApp from 'vue', import App.vue, mount to #app
-- For index.html: include <div id="app">
-- For vite.config.js: use @vitejs/plugin-vue
-- Make it visually polished with real content
-- Use proper Vue directives: v-if, v-for, v-model, v-on, v-bind, @click, :class`,
+MANDATORY OUTPUT FORMAT:
+- Output ONLY the raw code.
+- NO markdown code fences.
+- NO explanations.
+- NO backticks around URLs or imports.
+
+CORE RULES:
+- Use Vue 3 Composition API with <script setup> syntax.
+- .vue files MUST have <template>, <script setup>, and <style scoped> sections.
+- Use ref(), reactive(), computed(), watch() from 'vue'.
+- Use defineProps(), defineEmits() for component communication.
+- For main.js: Import createApp from 'vue', import App.vue, mount to #app.
+- Accessibility: Use semantic HTML and aria-labels.
+- Make it visually polished with real content.`,
 
     'svelte': `Generate complete, production-ready Svelte code for: {file_path}
 Project type: {projectType} | Style: {styling} | User wants: {userPrompt}
 
-RULES:
-- Output ONLY the raw code. No markdown, no explanations, no code fences.
-- .svelte files have <script>, <style>, and HTML template sections
-- Use Svelte reactivity: $: reactive statements, bind:, on:click
-- Use {#if}, {#each}, {#await} template blocks
-- Use writable/readable stores from 'svelte/store' for shared state
-- For main.js: import App from './App.svelte', new App({ target: document.getElementById('app') })
-- Export props with: export let propName
-- For component events: use createEventDispatcher
-- For svelte.config.js: use @sveltejs/vite-plugin-svelte
-- Make it visually polished with real content`,
+MANDATORY OUTPUT FORMAT:
+- Output ONLY the raw code.
+- NO markdown code fences.
+- NO explanations.
+- NO backticks around URLs or imports.
+
+CORE RULES:
+- .svelte files have <script>, <style>, and HTML template sections.
+- Use Svelte reactivity: $: reactive statements, bind:value, on:click.
+- Use {#if}, {#each}, {#await} template blocks.
+- Use writable/readable stores from 'svelte/store' for shared state.
+- Export props with: export let propName.
+- Make it visually polished with real content.`,
 
     'angular': `Generate complete, production-ready Angular code for: {file_path}
 Project type: {projectType} | Style: {styling} | User wants: {userPrompt}
 
-RULES:
-- Output ONLY the raw code. No markdown, no explanations, no code fences.
-- Use Angular 17+ with standalone components
-- Components use @Component decorator with standalone: true, imports array
-- Use signals for state: signal(), computed(), effect()
-- Use TypeScript with proper decorators and typing
-- For templates (.html): use Angular template syntax *ngIf, *ngFor, (click), [ngClass], {{ interpolation }}
-- For services: use @Injectable({ providedIn: 'root' })
-- For main.ts: use bootstrapApplication() with AppComponent
-- For angular.json: minimal config with build/serve targets
-- Make it visually polished with real content`,
+MANDATORY OUTPUT FORMAT:
+- Output ONLY the raw code.
+- NO markdown code fences.
+- NO explanations.
+- NO backticks around URLs or imports.
+
+CORE RULES:
+- Use Angular 17+ with standalone components.
+- Components use @Component decorator with standalone: true, imports array.
+- Use signals for state management: signal(), computed(), effect().
+- Use TypeScript with proper decorators and typing.
+- For templates (.html): Use modern Angular control flow (@if, @for).
+- Make it visually polished with real content.`,
 
     'astro': `Generate complete, production-ready Astro code for: {file_path}
 Project type: {projectType} | Style: {styling} | User wants: {userPrompt}
 
-RULES:
-- Output ONLY the raw code. No markdown, no explanations, no code fences.
-- .astro files have a frontmatter section (---) and HTML template
-- Use Astro components for static content, island architecture for interactive
-- Layouts wrap pages with <slot /> for content injection
-- For pages: use file-based routing in src/pages/
-- For astro.config.mjs: import { defineConfig } from 'astro/config'
-- Use <style> tags with scoped styles by default
-- For package.json: include astro as dependency
-- Can use client:load, client:idle, client:visible for hydration
-- Make it visually polished with real content`
+MANDATORY OUTPUT FORMAT:
+- Output ONLY the raw code.
+- NO markdown code fences.
+- NO explanations.
+- NO backticks around URLs or imports.
+
+CORE RULES:
+- .astro files have a frontmatter section (---) and HTML template.
+- Use Astro components for static content, islands for interactivity (client:load).
+- Layouts wrap pages with <slot /> for content injection.
+- Use <style> tags with scoped styles by default.
+- Make it visually polished with real content.`
 };
 
 // ─── Styling-Specific Instructions ──────────────────────────────────────────
 const STYLING_INSTRUCTIONS = {
     'tailwind': `
 TAILWIND CSS INSTRUCTIONS:
-- Use Tailwind utility classes extensively (flex, grid, p-4, text-lg, bg-blue-500, etc.)
-- Use responsive prefixes: sm:, md:, lg:, xl:
-- Use hover:, focus:, active: state variants
-- Use dark: variant for dark mode support
-- In CSS files: use @tailwind base; @tailwind components; @tailwind utilities;
-- In tailwind.config.js: extend theme with custom colors/fonts
-- Avoid writing custom CSS except for complex animations`,
+- Output ONLY the raw code. No markdown fences.
+- Use Tailwind utility classes extensively (flex, grid, p-4, text-lg, bg-blue-500, etc.).
+- Use responsive prefixes: sm:, md:, lg:, xl:.
+- Use state variants: hover:, focus:, active:, dark:.
+- For layout: Use flex/grid utilities; avoid absolute positioning unless necessary.
+- In CSS files: Use @tailwind base; @tailwind components; @tailwind utilities;.
+- For animations: Use animate-fade, animate-pulse or custom Tailwind animations.
+- Design: Ensure good contrast, consistent spacing (m/p), and modern aesthetics.`,
 
     'plain-css': `
 CSS INSTRUCTIONS:
-- Use CSS custom properties (variables) for theming
-- Use CSS Grid and Flexbox for layout
-- Use mobile-first responsive design with media queries
-- Use smooth transitions and subtle animations
-- Include a CSS reset/normalize at the top`,
+- Output ONLY the raw code. No markdown fences.
+- Use CSS custom properties (variables) for theming (--primary, --bg, etc.).
+- Use CSS Grid and Flexbox for modern, responsive layouts.
+- Mobile-first approach with media queries.
+- Smooth transitions: transition: all 0.3s ease-in-out;.
+- Include a CSS reset (box-sizing: border-box; margin: 0; padding: 0;).`,
 
     'css-modules': `
 CSS MODULES INSTRUCTIONS:
-- Name CSS files as *.module.css
-- Import styles as: import styles from './Component.module.css'
-- Use styles.className in JSX/template
-- Compose styles with composes: keyword`,
+- Name files as *.module.css.
+- Import as: import styles from './Component.module.css'.
+- Apply as: className={styles.container}.
+- Keep styles encapsulated and modular.`,
 
     'styled-components': `
 STYLED-COMPONENTS INSTRUCTIONS:
-- Import styled from 'styled-components'
-- Create styled components: const Button = styled.button\`...\`
-- Use props for dynamic styling: ${'{'}props => props.primary ? '...' : '...'{'}'}
-- Use ThemeProvider for theming`,
+- Create reusable styled components: const Container = styled.div\`...\`.
+- Use props for dynamic styling: ${'{'}props => props.active ? '...' : '...'{'}'}.
+- Implement a theme using ThemeProvider.`,
 
     'scss': `
 SCSS INSTRUCTIONS:
-- Use .scss file extension
-- Use variables ($primary: #4f46e5), nesting, mixins, extends
-- Use @use instead of @import
-- Create partials (_variables.scss, _mixins.scss)`
+- Use .scss extension with variables, nesting, and mixins.
+- Use @use and @forward for modern SCSS modularity.
+- Structure with partials (_variables.scss, _mixins.scss).`
 };
 
 // ─── Context Prompt for Inter-File Coherence ────────────────────────────────
-export const buildContextPrompt = (generatedFiles) => {
+function extractExportsAndSignatures(content, filePath) {
+    if (content.length <= 500) return content;
+    const lines = content.split('\n');
+    const out = [];
+    const ext = filePath.split('.').pop()?.toLowerCase();
+    
+    // Include important imports (first few lines)
+    const importLines = content.match(/^import\s+.*$/gm);
+    if (importLines) {
+        const relevantImports = importLines.filter(imp => 
+            !imp.includes('react') && 
+            !imp.includes('vue') && 
+            !imp.includes('svelte') &&
+            !imp.includes('lucide-react')
+        ).slice(0, 5);
+        if (relevantImports.length > 0) out.push(relevantImports.join('\n'));
+    }
+
+    if (['jsx', 'tsx', 'vue', 'svelte', 'js', 'ts'].includes(ext)) {
+        // 1. Default export identification
+        const defaultExport = content.match(/export\s+default\s+(?:function\s+)?(\w+)|export\s+default\s+(\w+)/);
+        if (defaultExport) out.push(`// Default Export: ${defaultExport[1] || defaultExport[2]}`);
+
+        // 2. Component Props / Interface Extraction
+        // Look for interfaces/types ending in Props or just 'Props'
+        const propsInterfaceMatch = content.match(/(?:interface|type)\s+\w*Props\w*\s*=\s*\{[^}]*\}|(?:interface|type)\s+\w*Props\w*\s*\{[^}]*\}/g);
+        if (propsInterfaceMatch) {
+            out.push('// Props Definition:\n' + propsInterfaceMatch.slice(0, 1).join('\n'));
+        }
+
+        // 3. Named Exports (signatures only)
+        const namedExportLines = lines.filter(line => 
+            line.trim().startsWith('export const') || 
+            line.trim().startsWith('export function') || 
+            line.trim().startsWith('export interface') || 
+            line.trim().startsWith('export type') ||
+            line.trim().startsWith('export class')
+        );
+        if (namedExportLines.length > 0) {
+            const signatures = namedExportLines.slice(0, 5).map(l => {
+                const trimmed = l.trim();
+                // If it's a function, try to get the signature
+                if (trimmed.includes('function') || trimmed.includes('=>')) {
+                    const match = trimmed.match(/(?:export\s+)?(?:const|function)\s+(\w+)\s*(?:=\s*)?(\([^)]*\))/);
+                    if (match) return `export ${match[1]}${match[2]}`;
+                }
+                return trimmed;
+            });
+            out.push('// Named Exports:\n' + signatures.join('\n'));
+        }
+
+        // 4. Function/Component Signatures from destructured props
+        if (content.includes('({')) {
+            const componentSig = content.match(/(?:const|function)\s+([A-Z]\w+)\s*=\s*\(\{([^})]*)\}\)/);
+            if (componentSig) {
+                out.push(`// Component: ${componentSig[1]} (Props: ${componentSig[2].trim()})`);
+            }
+        }
+    } else if (['css', 'scss'].includes(ext)) {
+        // CSS variables
+        const variables = content.match(/--[\w-]+\s*:\s*[^;]+;/g);
+        if (variables) out.push('// Theme Variables:\n' + variables.slice(0, 15).join('\n'));
+        
+        // Key selectors for layout/theme
+        const selectors = content.match(/^[:.][\w-]+\s*\{/gm);
+        if (selectors) {
+            out.push('// Selectors: ' + selectors.slice(0, 10).map(s => s.replace('{', '').trim()).join(', '));
+        }
+    } else if (filePath.endsWith('package.json')) {
+        try {
+            const pkg = JSON.parse(content);
+            const deps = { ...pkg.dependencies };
+            const scripts = pkg.scripts ? Object.keys(pkg.scripts) : [];
+            out.push(`// Dependencies: ${Object.keys(deps).join(', ')}`);
+            if (scripts.length > 0) out.push(`// Scripts: ${scripts.join(', ')}`);
+        } catch (e) {
+            out.push('// package.json (invalid JSON)');
+        }
+    }
+
+    if (out.length === 0) return content.substring(0, 500) + '\n// ...';
+    return out.join('\n\n') + '\n// ... (context excerpt)';
+}
+
+export const buildContextPrompt = (generatedFiles, currentFilePath) => {
     if (!generatedFiles || Object.keys(generatedFiles).length === 0) return '';
 
-    const fileList = Object.entries(generatedFiles)
-        .map(([path, content]) => {
-            // Truncate large files to 1500 chars for context
-            const truncated = content.length > 1500
-                ? content.substring(0, 1500) + '\n// ... (truncated)'
-                : content;
-            return `--- ${path} ---\n${truncated}`;
+    // Prioritize files:
+    // 1. Critical config (package.json, tailwind.config.js, etc.)
+    // 2. Global styles (index.css, globals.css)
+    // 3. Files in the same directory as currentFilePath
+    // 4. Everything else
+    
+    const entries = Object.entries(generatedFiles);
+    const currentDir = currentFilePath ? currentFilePath.split('/').slice(0, -1).join('/') : null;
+    const isCritical = (p) => p.includes('package.json') || p.includes('config.') || p.includes('tsconfig');
+    const isStyle = (p) => p.endsWith('.css') || p.endsWith('.scss');
+    const sameDir = (p) => currentDir !== null && p.split('/').slice(0, -1).join('/') === currentDir;
+
+    const sortedEntries = entries.sort(([pathA], [pathB]) => {
+        if (isCritical(pathA) && !isCritical(pathB)) return -1;
+        if (!isCritical(pathA) && isCritical(pathB)) return 1;
+        if (isStyle(pathA) && !isStyle(pathB)) return -1;
+        if (!isStyle(pathA) && isStyle(pathB)) return 1;
+        if (sameDir(pathA) && !sameDir(pathB)) return -1;
+        if (!sameDir(pathA) && sameDir(pathB)) return 1;
+        return 0;
+    });
+
+    // Limit context to top 10 most relevant files to save tokens
+    const limitedEntries = sortedEntries.slice(0, 10);
+
+    const fileList = limitedEntries
+        .map(([p, content]) => {
+            const excerpt = extractExportsAndSignatures(content, p);
+            return `--- ${p} ---\n${excerpt}`;
         })
         .join('\n\n');
 
-    return `\nPREVIOUSLY GENERATED FILES (reference these for consistency - match imports, class names, variable names, color schemes, component names):\n${fileList}\n`;
+    return `\nPREVIOUSLY GENERATED FILES (reference these for consistency - match imports, export names, component names, props):\n${fileList}\n`;
 };
 
+const EXPORT_IMPORT_RULES = `
+GLOBAL CODE QUALITY RULES:
+- Output ONLY the raw code.
+- NO markdown code fences (NO \`\`\`js, NO \`\`\`html).
+- NO conversational filler.
+- NO backticks (\`) around URLs or attribute values.
+- Every component file MUST have a default export. 
+- Import paths must match exactly: if you import from './components/Header', the file must exist at that path.
+- Do NOT use placeholder content like "Lorem ipsum" or "TODO" — generate real, relevant content.`;
+
 // ─── Build the Full Code Generation Prompt ──────────────────────────────────
-export const buildCodeGenPrompt = ({ filePath, framework, projectType, styling, stylingFramework, userPrompt, generatedFiles }) => {
-    const basePrompt = FRAMEWORK_PROMPTS[framework] || FRAMEWORK_PROMPTS['vanilla-js'];
+export const buildCodeGenPrompt = ({ filePath, framework, projectType, styling, stylingFramework, userPrompt, generatedFiles, planFiles = [] }) => {
+    const basePrompt = FRAMEWORK_PROMPTS[framework] || FRAMEWORK_PROMPTS[config.defaultFramework];
     const stylingInst = STYLING_INSTRUCTIONS[stylingFramework] || STYLING_INSTRUCTIONS['plain-css'];
-    const context = buildContextPrompt(generatedFiles);
+    const context = buildContextPrompt(generatedFiles, filePath);
 
     let prompt = basePrompt
         .replace(/{file_path}/g, filePath)
@@ -298,8 +417,21 @@ export const buildCodeGenPrompt = ({ filePath, framework, projectType, styling, 
         .replace(/{styling}/g, styling || 'modern')
         .replace(/{userPrompt}/g, userPrompt);
 
+    prompt += EXPORT_IMPORT_RULES;
     prompt += stylingInst;
     prompt += context;
+
+    const otherPlannedPaths = (planFiles || []).filter(f => (f.path || f) !== filePath).map(f => (typeof f === 'string' ? f : f.path));
+    const alreadyGeneratedPaths = Object.keys(generatedFiles || {}).filter(p => p !== filePath);
+    if (otherPlannedPaths.length > 0 || alreadyGeneratedPaths.length > 0) {
+        prompt += `\nFILE CONTRACT:\n`;
+        if (otherPlannedPaths.length > 0) {
+            prompt += `FILES THAT MAY IMPORT FROM THIS FILE: ${otherPlannedPaths.slice(0, 10).join(', ')}\n`;
+        }
+        if (alreadyGeneratedPaths.length > 0) {
+            prompt += `THIS FILE SHOULD IMPORT FROM (if needed): ${alreadyGeneratedPaths.slice(0, 12).join(', ')}\n`;
+        }
+    }
 
     return prompt;
 };
@@ -336,22 +468,24 @@ export const getMaxTokens = (filePath, complexity) => {
     return isAdvanced ? 6144 : 4096;
 };
 
-// ─── Initialize Anthropic Client ────────────────────────────────────────────
-export const initializeModel = async () => {
-    if (anthropic) return { anthropic };
+// ─── LLM config (Gemini) ─────────────────────────────────────────────────────
+const { model, maxTokensDefault, temperature } = config.llm.gemini;
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+export const initializeModel = async () => {
+    if (ai) return { ai };
+
+    const apiKey = config.llm.gemini.apiKey;
     if (!apiKey) {
-        throw new Error("ANTHROPIC_API_KEY is missing in environment variables.");
+        throw new Error("GEMINI_API_KEY (or GOOGLE_API_KEY) is missing in environment variables.");
     }
 
     try {
-        console.log("Initializing Anthropic client...");
-        anthropic = new Anthropic({ apiKey });
-        console.log("Anthropic client initialized successfully");
-        return { anthropic };
+        logger.info("Initializing Gemini (Google GenAI) client...");
+        ai = new GoogleGenAI({ apiKey });
+        logger.info("Gemini client initialized successfully");
+        return { ai };
     } catch (e) {
-        console.error("Failed to initialize Anthropic client:", e);
+        logger.error("Failed to initialize Gemini client:", e);
         throw e;
     }
 };
@@ -361,22 +495,21 @@ export const generateCompletion = async (prompt, options = {}) => {
     try {
         await initializeModel();
 
-        const systemPrompt = options.systemPrompt || "You are an expert full-stack developer. Output ONLY code. No explanations, no markdown code fences.";
+        const systemPrompt = options.systemPrompt || "You are a professional code generator. Output ONLY raw code. NO markdown code fences, NO explanations, NO conversational text, NO backticks around URLs or attributes.";
 
-        const response = await anthropic.messages.create({
-            model: options.model || "claude-sonnet-4-20250514",
-            max_tokens: options.maxTokens || 4096,
-            temperature: options.temperature ?? 0.1,
-            system: systemPrompt,
-            messages: [
-                { role: "user", content: prompt }
-            ]
+        const response = await ai.models.generateContent({
+            model: options.model || model,
+            contents: prompt,
+            config: {
+                systemInstruction: systemPrompt,
+                maxOutputTokens: options.maxTokens || maxTokensDefault,
+                temperature: options.temperature ?? temperature,
+            },
         });
 
-        const textContent = response.content.find(block => block.type === 'text')?.text || '';
-        return textContent;
+        return response.text ?? '';
     } catch (e) {
-        console.error("Generation error:", e);
+        logger.error("Generation error:", e);
         throw e;
     }
 };
@@ -392,20 +525,19 @@ export const generateFix = async (prompt, options = {}) => {
             "No explanations, no markdown code fences, no conversational text. " +
             "Preserve all existing functionality and styling.";
 
-        const response = await anthropic.messages.create({
-            model: options.model || "claude-sonnet-4-20250514",
-            max_tokens: options.maxTokens || 4096,
-            temperature: options.temperature ?? 0.1,
-            system: systemPrompt,
-            messages: [
-                { role: "user", content: prompt }
-            ]
+        const response = await ai.models.generateContent({
+            model: options.model || model,
+            contents: prompt,
+            config: {
+                systemInstruction: systemPrompt,
+                maxOutputTokens: options.maxTokens || maxTokensDefault,
+                temperature: options.temperature ?? temperature,
+            },
         });
 
-        const textContent = response.content.find(block => block.type === 'text')?.text || '';
-        return textContent;
+        return response.text ?? '';
     } catch (e) {
-        console.error("Fix generation error:", e);
+        logger.error("Fix generation error:", e);
         throw e;
     }
 };
@@ -415,31 +547,33 @@ export const generateCompletionStream = async (prompt, options = {}, onChunk) =>
     try {
         await initializeModel();
 
-        const systemPrompt = options.systemPrompt || "You are an expert full-stack developer. Output ONLY code. No explanations, no markdown code fences.";
+        const systemPrompt = options.systemPrompt || "You are a professional code generator. Output ONLY raw code. NO markdown code fences, NO explanations, NO conversational text, NO backticks around URLs or attributes.";
 
-        const stream = anthropic.messages.stream({
-            model: options.model || "claude-sonnet-4-20250514",
-            max_tokens: options.maxTokens || 4096,
-            temperature: options.temperature ?? 0.1,
-            system: systemPrompt,
-            messages: [
-                { role: "user", content: prompt }
-            ]
+        const stream = await ai.models.generateContentStream({
+            model: options.model || model,
+            contents: prompt,
+            config: {
+                systemInstruction: systemPrompt,
+                maxOutputTokens: options.maxTokens || maxTokensDefault,
+                temperature: options.temperature ?? temperature,
+            },
         });
 
         let fullText = '';
 
-        stream.on('text', (text) => {
-            fullText += text;
-            if (onChunk && typeof onChunk === 'function') {
-                onChunk(text, fullText);
+        for await (const chunk of stream) {
+            const text = chunk.text ?? '';
+            if (text) {
+                fullText += text;
+                if (onChunk && typeof onChunk === 'function') {
+                    onChunk(text, fullText);
+                }
             }
-        });
+        }
 
-        const finalMessage = await stream.finalMessage();
         return fullText;
     } catch (e) {
-        console.error("Streaming generation error:", e);
+        logger.error("Streaming generation error:", e);
         throw e;
     }
 };

@@ -1,12 +1,7 @@
+import config from '../config.js';
 import { generateCompletion, ANALYZER_PROMPT, PLANNER_PROMPT, FRAMEWORKS, STYLING_OPTIONS } from './llm.js';
 import { getCachedAnalysis, setCachedAnalysis, getCachedPlan, setCachedPlan } from './cache.js';
-import winston from 'winston';
-
-const logger = winston.createLogger({
-    level: 'info',
-    format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
-    transports: [new winston.transports.Console({ format: winston.format.simple() })]
-});
+import logger from './logger.js';
 
 // ─── Framework-Specific File Structures ──────────────────────────────────────
 const FRAMEWORK_FILE_STRUCTURES = {
@@ -329,7 +324,86 @@ function addTailwindFiles(files, framework) {
  */
 export class AnalysisService {
     constructor() {
-        this.jsonSystemPrompt = 'You output only valid JSON. No markdown, no code blocks, no explanations. Single JSON object only.';
+        this.jsonSystemPrompt = 'You MUST output ONLY a valid JSON object. NO markdown code fences (NO \`\`\`json), NO conversational text, NO explanations. Output MUST start with { and end with }.';
+    }
+
+    /**
+     * Helper for cleaning and parsing JSON responses (exported for testing)
+     */
+    static tryParseJson(str) {
+        if (!str || typeof str !== 'string') return null;
+        let s = str.trim();
+        if (s.length === 0) return null;
+
+        // Try to strip potential conversational prefix/suffix
+        if (!s.startsWith('{') && !s.startsWith('[')) {
+            const firstBrace = s.indexOf('{');
+            const firstBracket = s.indexOf('[');
+            const startIdx = firstBrace === -1 ? firstBracket : (firstBracket === -1 ? firstBrace : Math.min(firstBrace, firstBracket));
+            if (startIdx !== -1) s = s.substring(startIdx);
+        }
+
+        if (!s.endsWith('}') && !s.endsWith(']')) {
+            const lastBrace = s.lastIndexOf('}');
+            const lastBracket = s.lastIndexOf(']');
+            const endIdx = Math.max(lastBrace, lastBracket);
+            if (endIdx !== -1) s = s.substring(0, endIdx + 1);
+        }
+
+        try {
+            return JSON.parse(s);
+        } catch (e) {
+            // Fix common JSON errors: trailing commas, unquoted keys
+            let fixed = s
+                .replace(/,(\s*[}\]])/g, '$1') // trailing commas
+                .replace(/(['"])?([a-zA-Z0-9_$]+)(['"])?\s*:/g, '"$2":') // unquoted keys (basic)
+                .replace(/'/g, '"'); // single quotes to double quotes
+
+            try {
+                return JSON.parse(fixed);
+            } catch (e2) {
+                if (fixed.startsWith('{') && !fixed.endsWith('}')) {
+                    const toClose = (fixed.match(/{/g) || []).length - (fixed.match(/}/g) || []).length;
+                    if (toClose > 0) {
+                        try { return JSON.parse(fixed + '}'.repeat(toClose)); } catch (e3) { /* noop */ }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Helper for cleaning conversational artifacts (exported for testing)
+     */
+    static cleanResponse(response, prompt = '') {
+        if (!response || typeof response !== 'string') return '';
+        let cleaned = response.trim();
+
+        // Strip if response echoes prompt
+        if (prompt && cleaned.startsWith(prompt.trim())) {
+            cleaned = cleaned.substring(prompt.trim().length).trim();
+        }
+
+        const systemEchoes = [
+            'You are a code generator. Output ONLY code.',
+            'Output ONLY valid JSON.',
+            'You output only valid JSON.',
+            'Here is the JSON',
+            'Certainly!',
+            'Here is the',
+            'I can help you with that',
+            'I have analyzed your request',
+            '```json',
+            '```'
+        ];
+
+        for (const phrase of systemEchoes) {
+            const re = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            cleaned = cleaned.replace(re, '').trim();
+        }
+
+        return cleaned;
     }
 
     /**
@@ -343,39 +417,56 @@ export class AnalysisService {
             return cached;
         }
 
-        try {
-            let prompt = ANALYZER_PROMPT.replace('{prompt}', String(userPrompt));
+        let prompt = ANALYZER_PROMPT.replace('{prompt}', String(userPrompt));
 
-            // Add hints if user pre-selected framework/styling
-            const frameworkHint = options.framework && options.framework !== 'auto'
-                ? `\nUser has pre-selected framework: ${options.framework}. Use this framework.`
-                : '';
-            const stylingHint = options.styling && options.styling !== 'auto'
-                ? `\nUser has pre-selected styling: ${options.styling}. Use this styling framework.`
-                : '';
+        // Add hints if user pre-selected framework/styling
+        const frameworkHint = options.framework && options.framework !== 'auto'
+            ? `\nUser has pre-selected framework: ${options.framework}. Use this framework.`
+            : '';
+        const stylingHint = options.styling && options.styling !== 'auto'
+            ? `\nUser has pre-selected styling: ${options.styling}. Use this styling framework.`
+            : '';
 
-            prompt = prompt.replace('{frameworkHint}', frameworkHint).replace('{stylingHint}', stylingHint);
+        prompt = prompt.replace('{frameworkHint}', frameworkHint).replace('{stylingHint}', stylingHint);
 
-            const response = await generateCompletion(prompt, {
-                maxTokens: 800,
-                temperature: 0.1,
-                systemPrompt: this.jsonSystemPrompt
-            });
+        const maxAnalyzeAttempts = 2;
+        for (let attempt = 1; attempt <= maxAnalyzeAttempts; attempt++) {
+            try {
+                const response = await generateCompletion(prompt, {
+                    maxTokens: 800,
+                    temperature: 0.1,
+                    systemPrompt: this.jsonSystemPrompt
+                });
 
-            const result = this._extractJsonPayload(this._normalize(response), prompt);
+                const result = this._extractJsonPayload(this._normalize(response), prompt);
 
-            if (!result || typeof result !== 'object') {
-                logger.warn('Analyze: no valid JSON, using fallback');
-                return this._getAnalysisFallback(userPrompt, options);
+                if (result && typeof result === 'object') {
+                    const normalized = this._normalizeAnalysis(result, userPrompt, options);
+                    setCachedAnalysis(userPrompt, options, normalized);
+                    return normalized;
+                }
+
+                if (attempt < maxAnalyzeAttempts) {
+                    const delayMs = attempt * 1000;
+                    logger.warn(`Analyze attempt ${attempt}: no valid JSON, retrying in ${delayMs}ms`);
+                    await new Promise(r => setTimeout(r, delayMs));
+                } else {
+                    logger.warn('Analyze: no valid JSON after retries, using fallback');
+                    return this._getAnalysisFallback(userPrompt, options);
+                }
+            } catch (error) {
+                if (attempt < maxAnalyzeAttempts) {
+                    const delayMs = attempt * 1000;
+                    logger.warn(`Analyze error (attempt ${attempt}): ${error.message}, retrying in ${delayMs}ms`);
+                    await new Promise(r => setTimeout(r, delayMs));
+                } else {
+                    logger.warn(`Analyze error: ${error.message}, using fallback`);
+                    return this._getAnalysisFallback(userPrompt, options);
+                }
             }
-
-            const normalized = this._normalizeAnalysis(result, userPrompt, options);
-            setCachedAnalysis(userPrompt, options, normalized);
-            return normalized;
-        } catch (error) {
-            logger.warn(`Analyze error: ${error.message}, using fallback`);
-            return this._getAnalysisFallback(userPrompt, options);
         }
+
+        return this._getAnalysisFallback(userPrompt, options);
     }
 
     /**
@@ -388,40 +479,59 @@ export class AnalysisService {
             return cached;
         }
 
-        try {
-            const framework = requirements.framework || 'vanilla-js';
-            const projectType = requirements.projectType || 'web-app';
-            const complexity = requirements.complexity || 'simple';
-            const stylingFramework = requirements.stylingFramework || 'plain-css';
+        const framework = requirements.framework || config.defaultFramework;
+        const projectType = requirements.projectType || 'web-app';
+        const complexity = requirements.complexity || 'simple';
+        const stylingFramework = requirements.stylingFramework || 'plain-css';
 
-            const prompt = PLANNER_PROMPT
-                .replace('{requirements}', JSON.stringify(requirements, null, 2))
-                .replace('{projectType}', projectType)
-                .replace('{framework}', framework)
-                .replace('{stylingFramework}', stylingFramework)
-                .replace('{complexity}', complexity);
+        const prompt = PLANNER_PROMPT
+            .replace('{requirements}', JSON.stringify(requirements, null, 2))
+            .replace('{projectType}', projectType)
+            .replace('{framework}', framework)
+            .replace('{stylingFramework}', stylingFramework)
+            .replace('{complexity}', complexity);
 
-            const response = await generateCompletion(prompt, {
-                maxTokens: 1500,
-                temperature: 0.1,
-                systemPrompt: 'You output only valid JSON. No markdown, no code blocks, no explanations. Single JSON object with a "files" array only.'
-            });
+        const planSystemPrompt = 'You MUST output ONLY a valid JSON object. NO markdown code fences (NO ```json), NO conversational text, NO explanations. Output MUST start with { and end with }.';
 
-            const result = this._extractJsonPayload(this._normalize(response), prompt);
-            const validFiles = Array.isArray(result?.files) && result.files.length > 0;
+        const maxPlanAttempts = 2;
+        for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
+            try {
+                const response = await generateCompletion(prompt, {
+                    maxTokens: 1500,
+                    temperature: 0.1,
+                    systemPrompt: planSystemPrompt
+                });
 
-            if (!result || typeof result !== 'object' || !validFiles) {
-                logger.warn('Plan: no valid JSON from LLM, using framework-specific fallback');
-                return this._getPlanFallback(requirements);
+                const result = this._extractJsonPayload(this._normalize(response), prompt);
+                const validFiles = Array.isArray(result?.files) && result.files.length > 0;
+
+                if (result && typeof result === 'object' && validFiles) {
+                    const normalized = this._normalizePlan(result, requirements);
+                    setCachedPlan(requirements, normalized);
+                    return normalized;
+                }
+
+                if (attempt < maxPlanAttempts) {
+                    const delayMs = attempt * 1000;
+                    logger.warn(`Plan attempt ${attempt}: no valid JSON, retrying in ${delayMs}ms`);
+                    await new Promise(r => setTimeout(r, delayMs));
+                } else {
+                    logger.warn('Plan: no valid JSON from LLM after retries, using framework-specific fallback');
+                    return this._getPlanFallback(requirements);
+                }
+            } catch (error) {
+                if (attempt < maxPlanAttempts) {
+                    const delayMs = attempt * 1000;
+                    logger.warn(`Plan error (attempt ${attempt}): ${error.message}, retrying in ${delayMs}ms`);
+                    await new Promise(r => setTimeout(r, delayMs));
+                } else {
+                    logger.warn(`Plan error: ${error.message}, using fallback`);
+                    return this._getPlanFallback(requirements);
+                }
             }
-
-            const normalized = this._normalizePlan(result, requirements);
-            setCachedPlan(requirements, normalized);
-            return normalized;
-        } catch (error) {
-            logger.warn(`Plan error: ${error.message}, using fallback`);
-            return this._getPlanFallback(requirements);
         }
+
+        return this._getPlanFallback(requirements);
     }
 
     // ─── Private Methods ────────────────────────────────────────────────────
@@ -436,13 +546,13 @@ export class AnalysisService {
     _extractJsonPayload(cleanedResponse, prompt) {
         if (!cleanedResponse) return null;
 
-        let cleaned = this._cleanResponse(cleanedResponse, prompt);
+        let cleaned = AnalysisService.cleanResponse(cleanedResponse, prompt);
         const trimmed = cleaned.trim();
 
         // Try parse as-is
         if ((trimmed.startsWith('{') || trimmed.startsWith('[')) &&
             (trimmed.endsWith('}') || trimmed.endsWith(']'))) {
-            const parsed = this._tryParseJson(trimmed);
+            const parsed = AnalysisService.tryParseJson(trimmed);
             if (parsed !== null) return parsed;
         }
 
@@ -459,18 +569,18 @@ export class AnalysisService {
         // Try markdown code blocks
         const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
         if (codeBlockMatch) {
-            const parsed = this._tryParseJson(codeBlockMatch[1]);
+            const parsed = AnalysisService.tryParseJson(codeBlockMatch[1]);
             if (parsed !== null) return parsed;
         }
 
         // Try full cleaned response
-        let parsed = this._tryParseJson(cleaned);
+        let parsed = AnalysisService.tryParseJson(cleaned);
         if (parsed !== null) return parsed;
 
         // Try from start to last }
         const lastBrace = cleaned.lastIndexOf('}');
         if (lastBrace > 0) {
-            parsed = this._tryParseJson(cleaned.slice(0, lastBrace + 1));
+            parsed = AnalysisService.tryParseJson(cleaned.slice(0, lastBrace + 1));
             if (parsed !== null) return parsed;
         }
 
@@ -478,48 +588,11 @@ export class AnalysisService {
     }
 
     _cleanResponse(response, prompt) {
-        if (!response || typeof response !== 'string') return '';
-        let cleaned = response.trim();
-
-        if (prompt && cleaned.startsWith(prompt.trim())) {
-            cleaned = cleaned.substring(prompt.trim().length).trim();
-        }
-
-        const systemEchoes = [
-            'You are a code generator. Output ONLY code.',
-            'Output ONLY valid JSON.',
-            'You output only valid JSON.',
-        ];
-
-        for (const phrase of systemEchoes) {
-            const re = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-            cleaned = cleaned.replace(re, '').trim();
-        }
-
-        return cleaned;
+        return AnalysisService.cleanResponse(response, prompt);
     }
 
     _tryParseJson(str) {
-        if (!str || typeof str !== 'string') return null;
-        const s = str.trim();
-        if (s.length === 0) return null;
-
-        try {
-            return JSON.parse(s);
-        } catch (e) {
-            let fixed = s.replace(/,(\s*[}\]])/g, '$1');
-            try {
-                return JSON.parse(fixed);
-            } catch (e2) {
-                if (s.startsWith('{') && !s.endsWith('}')) {
-                    const toClose = (fixed.match(/{/g) || []).length - (fixed.match(/}/g) || []).length;
-                    if (toClose > 0) {
-                        try { return JSON.parse(fixed + '}'.repeat(toClose)); } catch (e3) { /* noop */ }
-                    }
-                }
-            }
-        }
-        return null;
+        return AnalysisService.tryParseJson(str);
     }
 
     _inferProjectType(prompt) {
@@ -550,7 +623,7 @@ export class AnalysisService {
         // Complex projects default to react
         const complexTypes = ['dashboard', 'saas', 'crm', 'admin', 'ecommerce'];
         if (complexTypes.some(t => p.includes(t))) return 'react';
-        return 'vanilla-js';
+        return config.defaultFramework;
     }
 
     _inferStylingFramework(prompt) {
@@ -581,7 +654,9 @@ export class AnalysisService {
             colorScheme: '',
             layout: '',
             description: `A ${projectType} built with ${framework}`,
-            isFallback: true
+            isFallback: true,
+            usedFallback: true,
+            warning: 'Could not parse AI response; using default requirements.'
         };
     }
 
@@ -618,22 +693,28 @@ export class AnalysisService {
             colorScheme: result.colorScheme || '',
             layout: result.layout || '',
             description: result.description || `A ${projectType} built with ${framework}`,
-            isFallback: false
+            isFallback: false,
+            usedFallback: false
         };
     }
 
     _getPlanFallback(requirements) {
-        const framework = requirements.framework || 'vanilla-js';
+        const framework = requirements.framework || config.defaultFramework;
         const complexity = requirements.complexity || 'simple';
         const stylingFramework = requirements.stylingFramework || 'plain-css';
 
         // Get framework-specific structure
-        const structures = FRAMEWORK_FILE_STRUCTURES[framework] || FRAMEWORK_FILE_STRUCTURES['vanilla-js'];
-        let files = [...(structures[complexity] || structures['simple'])];
+        const structures = FRAMEWORK_FILE_STRUCTURES[framework] || FRAMEWORK_FILE_STRUCTURES[config.defaultFramework];
+        let files = [...(structures[complexity] || structures['simple'] || FRAMEWORK_FILE_STRUCTURES[config.defaultFramework].simple)];
 
         // Add tailwind files if needed
         if (stylingFramework === 'tailwind') {
             files = addTailwindFiles(files, framework);
+        }
+
+        // Defensive: never return empty files
+        if (files.length === 0) {
+            files = [...FRAMEWORK_FILE_STRUCTURES[config.defaultFramework].simple];
         }
 
         // Build tech stack
@@ -643,12 +724,14 @@ export class AnalysisService {
             files,
             techStack,
             designSystem: { primaryColor: '#4f46e5', fontFamily: 'Inter' },
-            isFallback: true
+            isFallback: true,
+            usedFallback: true,
+            warning: 'Could not parse AI response; using default file list.'
         };
     }
 
     _normalizePlan(result, requirements) {
-        const framework = requirements.framework || 'vanilla-js';
+        const framework = requirements.framework || config.defaultFramework;
         const stylingFramework = requirements.stylingFramework || 'plain-css';
 
         let files = result.files.map(f =>
@@ -666,7 +749,7 @@ export class AnalysisService {
         }
 
         // Ensure package.json for non-vanilla
-        if (framework !== 'vanilla-js') {
+        if (framework !== config.defaultFramework) {
             const hasPkg = files.some(f => f.path === 'package.json');
             if (!hasPkg) {
                 files.push({ path: 'package.json', purpose: 'Dependencies and scripts' });
@@ -677,7 +760,8 @@ export class AnalysisService {
             files,
             techStack: result.techStack || this._buildTechStack(framework, stylingFramework),
             designSystem: result.designSystem || { primaryColor: '#4f46e5', fontFamily: 'Inter' },
-            isFallback: false
+            isFallback: false,
+            usedFallback: false
         };
     }
 
@@ -712,7 +796,7 @@ export class AnalysisService {
             ]
         };
 
-        const checks = entryChecks[framework] || entryChecks['vanilla-js'];
+        const checks = entryChecks[framework] || entryChecks[config.defaultFramework];
         for (const { check, file } of checks) {
             const hasFile = files.some(f => (f.path || '').includes(check));
             if (!hasFile) {

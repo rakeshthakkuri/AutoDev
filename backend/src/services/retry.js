@@ -2,6 +2,9 @@
 // Retry Handler with Circuit Breaker + Exponential Backoff + Jitter
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import config from '../config.js';
+import logger from './logger.js';
+
 const STATE = { CLOSED: 'CLOSED', OPEN: 'OPEN', HALF_OPEN: 'HALF_OPEN' };
 
 export class CircuitBreaker {
@@ -36,7 +39,7 @@ export class CircuitBreaker {
         this.lastFailureTime = Date.now();
         if (this.failureCount >= this.failureThreshold) {
             this.state = STATE.OPEN;
-            console.warn(`Circuit breaker OPEN after ${this.failureCount} failures. Will retry in ${this.resetTimeoutMs / 1000}s.`);
+            logger.warn(`Circuit breaker OPEN after ${this.failureCount} failures. Will retry in ${this.resetTimeoutMs / 1000}s.`);
         }
     }
 
@@ -46,7 +49,7 @@ export class CircuitBreaker {
 }
 
 export class RetryHandler {
-    constructor(maxRetries = 3, initialDelay = 2000, maxDelay = 15000) {
+    constructor(maxRetries = config.generation.maxRetries, initialDelay = 2000, maxDelay = 15000) {
         this.maxRetries = maxRetries;
         this.initialDelay = initialDelay;
         this.maxDelay = maxDelay;
@@ -67,55 +70,46 @@ export class RetryHandler {
      * @param {Function} generationFunc - (prompt) => Promise<{ code, error }>
      * @param {string} prompt - Original prompt
      * @param {string} filePath - For logging
-     * @param {number} attempt - Current attempt (0 = first try)
      */
-    async retryWithFeedback(generationFunc, prompt, filePath, attempt = 0) {
-        if (attempt >= this.maxRetries) {
-            return { success: false, error: `Max retries (${this.maxRetries}) exceeded for ${filePath}` };
-        }
+    async retryWithFeedback(generationFunc, prompt, filePath) {
+        // Iterative (not recursive) to avoid stack growth with large maxRetries
+        for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+            // Check circuit breaker before each attempt
+            if (!this.circuitBreaker.canExecute()) {
+                logger.warn(`Circuit breaker OPEN — skipping retry for ${filePath}`);
+                return { success: false, error: 'Circuit breaker open — API is overloaded' };
+            }
 
-        // Check circuit breaker
-        if (!this.circuitBreaker.canExecute()) {
-            console.warn(`Circuit breaker OPEN — skipping retry for ${filePath}`);
-            return { success: false, error: 'Circuit breaker open — API is overloaded' };
-        }
+            if (attempt > 0) {
+                const delay = this._getDelay(attempt);
+                logger.info(`Retry ${attempt + 1}/${this.maxRetries} for ${filePath} after ${delay}ms`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
 
-        const isRetry = attempt > 0;
-        if (isRetry) {
-            const delay = this._getDelay(attempt);
-            console.log(`Retry ${attempt + 1}/${this.maxRetries} for ${filePath} after ${delay}ms`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-        }
+            try {
+                const result = await generationFunc(prompt);
 
-        // On retries, we still use the original prompt — the agentic fixer will
-        // handle error-specific feedback after initial generation + validation.
-        // This keeps the retry handler focused on LLM call reliability (network,
-        // rate limits, empty responses) rather than code quality.
-        try {
-            const result = await generationFunc(prompt);
-
-            if (result.code && result.code.length > 10) {
-                const hasValidCode = this._validateCodeContent(result.code, filePath);
-                if (hasValidCode) {
-                    this.circuitBreaker.recordSuccess();
-                    return { success: true, code: result.code };
+                if (result.code && result.code.length > 10) {
+                    const hasValidCode = this._validateCodeContent(result.code, filePath);
+                    if (hasValidCode) {
+                        this.circuitBreaker.recordSuccess();
+                        return { success: true, code: result.code };
+                    }
+                    logger.info(`Code content validation failed for ${filePath}, retrying...`);
                 }
-                console.log(`Code content validation failed for ${filePath}, retrying...`);
+                // Empty/invalid result — loop to next attempt
+            } catch (e) {
+                this.circuitBreaker.recordFailure();
+
+                if (e.message?.includes('429') || e.message?.includes('rate limit')) {
+                    logger.warn(`Rate limited for ${filePath}. Waiting longer before retry.`);
+                    await new Promise(resolve => setTimeout(resolve, 10000));
+                }
+                // Loop to next attempt
             }
-
-            // Retry
-            return this.retryWithFeedback(generationFunc, prompt, filePath, attempt + 1);
-        } catch (e) {
-            this.circuitBreaker.recordFailure();
-
-            // If it's a rate limit or server error, don't retry immediately
-            if (e.message?.includes('429') || e.message?.includes('rate limit')) {
-                console.warn(`Rate limited for ${filePath}. Waiting longer before retry.`);
-                await new Promise(resolve => setTimeout(resolve, 10000));
-            }
-
-            return this.retryWithFeedback(generationFunc, prompt, filePath, attempt + 1);
         }
+
+        return { success: false, error: `Max retries (${this.maxRetries}) exceeded for ${filePath}` };
     }
 
     /**

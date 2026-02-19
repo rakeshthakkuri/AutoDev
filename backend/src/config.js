@@ -21,9 +21,18 @@ const config = {
 
     // ── LLM Provider
     llm: {
-        provider: process.env.LLM_PROVIDER || 'anthropic',  // 'anthropic' | 'openai'
+        provider: process.env.LLM_PROVIDER || 'gemini',  // 'gemini' | 'anthropic' | 'openai'
 
-        // Anthropic
+        // Google Gemini (default)
+        gemini: {
+            apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
+            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+            maxTokensDefault: parseInt(process.env.LLM_MAX_TOKENS, 10) || 4096,
+            maxTokensLarge: parseInt(process.env.LLM_MAX_TOKENS_LARGE, 10) || 8192,
+            temperature: parseFloat(process.env.LLM_TEMPERATURE) || 0.1,
+        },
+
+        // Anthropic (optional)
         anthropic: {
             apiKey: process.env.ANTHROPIC_API_KEY || '',
             model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
@@ -55,10 +64,17 @@ const config = {
 
     // ── Generation
     generation: {
-        maxFileTimeout: parseInt(process.env.MAX_FILE_TIMEOUT, 10) || 120000,       // 2 min per file
-        maxTotalTimeout: parseInt(process.env.MAX_TOTAL_TIMEOUT, 10) || 300000,      // 5 min total
+        maxFileTimeout: parseInt(process.env.MAX_FILE_TIMEOUT, 10) || 240000,       // 4 min per file (avoids "Phase timeout exceeded" on slow LLM)
+        maxTotalTimeout: parseInt(process.env.MAX_TOTAL_TIMEOUT, 10) || 600000,     // 10 min total
         maxRetries: parseInt(process.env.MAX_RETRIES, 10) || 3,
         concurrentBatchSize: parseInt(process.env.CONCURRENT_BATCH, 10) || 3,
+    },
+
+    // ── Agent (orchestrator)
+    agent: {
+        maxSteps: parseInt(process.env.AGENT_MAX_STEPS, 10) || 500,
+        maxFixAttempts: parseInt(process.env.AGENT_MAX_FIX_ATTEMPTS, 10) || 2,
+        maxFixAttemptsTruncation: parseInt(process.env.AGENT_MAX_FIX_ATTEMPTS_TRUNCATION, 10) || 3,
     },
 
     // ── Cache
@@ -76,7 +92,8 @@ const config = {
         maxFiles: 5,
     },
 
-    // ── Supported frameworks/styling (used for validation)
+    // ── Supported frameworks/styling (single source of truth for validation and prompts)
+    defaultFramework: 'vanilla-js',
     frameworks: ['vanilla-js', 'react', 'react-ts', 'nextjs', 'vue', 'svelte', 'angular', 'astro'],
     stylingOptions: ['tailwind', 'plain-css', 'css-modules', 'styled-components', 'scss'],
     complexityLevels: ['simple', 'intermediate', 'advanced'],

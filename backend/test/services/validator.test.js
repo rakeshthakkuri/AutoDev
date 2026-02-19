@@ -40,9 +40,27 @@ describe('CodeValidator', () => {
         });
 
         it('validates complete HTML as valid', () => {
-            const html = '<!DOCTYPE html><html><head><title>Test</title></head><body><p>Content here that is long enough to pass the length check for validation.</p></body></html>';
-            const result = validator.validateFile(html, 'index.html');
+            const html = '<!DOCTYPE html><html><head><title>Test</title><link rel="stylesheet" href="styles.css"></head><body><p>Content here that is long enough to pass the length check for validation.</p><script src="script.js" defer></script></body></html>';
+            const result = validator.validateFile(html, 'index.html', 'vanilla-js');
             assert.strictEqual(result.isValid, true);
+        });
+
+        it('auto-fixes missing styles.css and script.js links in vanilla-js', () => {
+            const html = '<!DOCTYPE html><html><head><title>Test</title></head><body><p>Content here that is long enough to pass the length check for validation.</p></body></html>';
+            const result = validator.validateFile(html, 'index.html', 'vanilla-js');
+            assert.strictEqual(result.isValid, false);
+            assert.ok(result.errors.some(e => e.includes('styles.css')));
+            assert.ok(result.errors.some(e => e.includes('script.js')));
+            assert.ok(result.fixedCode.includes('href="styles.css"'));
+            assert.ok(result.fixedCode.includes('src="script.js"'));
+        });
+
+        it('does not require styles.css/script.js links for non-vanilla-js frameworks', () => {
+            const html = '<!DOCTYPE html><html><head><title>Test</title></head><body><div id="root"></div></body></html>';
+            const result = validator.validateFile(html, 'index.html', 'react');
+            // It might still have warnings but should not have the specific vanilla-js errors
+            const hasVanillaErrors = result.errors.some(e => e.includes('styles.css') || e.includes('script.js'));
+            assert.strictEqual(hasVanillaErrors, false);
         });
     });
 

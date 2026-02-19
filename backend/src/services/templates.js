@@ -2,6 +2,8 @@
 // Comprehensive Template Library — fallback templates for 8 frameworks
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import config from '../config.js';
+
 const year = new Date().getFullYear();
 
 // ─── Package.json Templates ─────────────────────────────────────────────────
@@ -846,7 +848,7 @@ function slug(title) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const getTemplate = (filePath, ctx = {}) => {
-    const { projectType = 'landing-page', framework = 'vanilla-js', stylingFramework = 'plain-css', title = 'My Website', description = '' } = ctx;
+    const { projectType = 'landing-page', framework = config.defaultFramework, stylingFramework = 'plain-css', title = 'My Website', description = '' } = ctx;
     const fp = filePath.toLowerCase();
     const fname = filePath.split('/').pop().toLowerCase();
 
@@ -867,7 +869,7 @@ export const getTemplate = (filePath, ctx = {}) => {
     // ── Framework-specific file routing ──────────────────────────────────
 
     // -- Vanilla JS --
-    if (framework === 'vanilla-js') {
+    if (framework === config.defaultFramework) {
         if (fp.endsWith('.html')) return vanillaHtml(title, description);
         if (fp.endsWith('.css')) return vanillaCss();
         if (fp.endsWith('.js')) return vanillaJs();

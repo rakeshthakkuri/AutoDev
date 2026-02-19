@@ -82,39 +82,22 @@ export default function LivePreview({ files }: LivePreviewProps) {
       }
 
       if (!bundled.html) {
-        const iframe = iframeRef.current;
-        const doc = iframe.contentDocument || iframe.contentWindow?.document;
-        if (doc) {
-          doc.open();
-          doc.write(`<html><body style="font-family:system-ui,sans-serif;padding:2rem;color:#888;text-align:center;background:#0a0a0b">
+        const fallbackHtml = `<html><body style="font-family:system-ui,sans-serif;padding:2rem;color:#888;text-align:center;background:#0a0a0b">
             <h2 style="color:#ccc;margin-bottom:1rem">Preview Unavailable</h2>
             <p style="margin-bottom:1.5rem">No renderable content found. Generated files:</p>
             <div style="padding:1rem;background:rgba(255,255,255,0.05);border-radius:12px;text-align:left;border:1px solid rgba(255,255,255,0.08)">
               ${Object.keys(allFiles).map(f => `<div style="margin:.35rem 0;font-family:monospace;font-size:0.85rem;color:#a1a1aa">${escapeHtml(f)}</div>`).join('')}
             </div>
-          </body></html>`);
-          doc.close();
-        }
+          </body></html>`;
+        iframeRef.current.srcdoc = fallbackHtml;
         setIsLoading(false);
         return;
       }
 
-      const iframe = iframeRef.current;
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (doc && bundled.html) {
-        try {
-          doc.open();
-          doc.write(bundled.html);
-          doc.close();
-          setError(null);
-        } catch (writeErr) {
-          const msg = writeErr instanceof Error ? writeErr.message : 'Failed to render preview';
-          doc.open();
-          doc.write(`<!DOCTYPE html><html><body style="font-family:system-ui;padding:2rem;color:#ccc;background:#0a0a0b"><h2 style="color:#ef4444">Preview Error</h2><p style="color:#a1a1aa">${escapeHtml(msg)}</p></body></html>`);
-          doc.close();
-          setError(msg);
-        }
-      }
+      // Use srcdoc to safely inject HTML — avoids document.write() issues with
+      // scripts containing import/export that the browser rejects mid-parse.
+      iframeRef.current.srcdoc = bundled.html;
+      setError(null);
     } catch (err) {
       console.error('Preview error:', err);
       setError(err instanceof Error ? err.message : 'Error loading preview');
@@ -131,8 +114,11 @@ export default function LivePreview({ files }: LivePreviewProps) {
     const allFiles = getAllFiles();
     const bundled = bundleProject(allFiles);
     if (bundled.html) {
-      const newWindow = window.open();
-      if (newWindow) { newWindow.document.write(bundled.html); newWindow.document.close(); }
+      const blob = new Blob([bundled.html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      // Clean up blob URL after a short delay
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
     }
   };
 

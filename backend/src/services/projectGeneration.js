@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { generateCompletionStream, buildCodeGenPrompt, getMaxTokens } from './llm.js';
 import { CodeValidator } from './validator.js';
 import { RetryHandler } from './retry.js';
+import { AgentFixer } from './agentFixer.js';
 import { getTemplate } from './templates.js';
 import winston from 'winston';
 
@@ -24,12 +25,13 @@ export class ProjectGenerationService {
         this.generatedDir = generatedDir;
         this.validator = new CodeValidator();
         this.retryHandler = new RetryHandler();
+        this.agentFixer = new AgentFixer();
     }
 
     /**
      * Generate a complete project with streaming support
      */
-    async generateProject({ userPrompt, requirements, plan, onProgress, onFileGenerated, onFileChunk, onError, onPlan }) {
+    async generateProject({ userPrompt, requirements, plan, onProgress, onFileGenerated, onFileChunk, onError, onPlan, onFileFixing, onFileFixed }) {
         const startTime = Date.now();
         const projectId = `project_${crypto.randomUUID().split('-')[0]}`;
         const projectDir = path.join(this.generatedDir, projectId);
@@ -85,7 +87,9 @@ export class ProjectGenerationService {
                         onProgress,
                         onFileGenerated,
                         onFileChunk,
-                        onError
+                        onError,
+                        onFileFixing,
+                        onFileFixed,
                     }),
                     timeoutPromise
                 ]);
@@ -111,7 +115,9 @@ export class ProjectGenerationService {
                             onProgress,
                             onFileGenerated,
                             onFileChunk,
-                            onError
+                            onError,
+                            onFileFixing,
+                            onFileFixed,
                         })
                     )),
                     timeoutPromise
@@ -119,6 +125,19 @@ export class ProjectGenerationService {
 
                 filesCompleted += batch.length;
             }
+
+            // ── Post-generation review: cross-file validation + agentic fix ──
+            onProgress?.('Reviewing project structure...', 95);
+
+            await this._postGenerationReview({
+                generatedFiles,
+                requirements,
+                userPrompt,
+                projectDir,
+                onFileFixed,
+                onFileFixing,
+                onFileGenerated,
+            });
 
             const duration = (Date.now() - startTime) / 1000;
             logger.info(`Generation complete in ${duration}s — ${totalFiles} files`);
@@ -140,7 +159,7 @@ export class ProjectGenerationService {
     /**
      * Generate a single file (with streaming, retry, validation)
      */
-    async _generateSingleFile({ fileInfo, userPrompt, requirements, projectDir, generatedFiles, totalFiles, filesCompleted, onProgress, onFileGenerated, onFileChunk, onError }) {
+    async _generateSingleFile({ fileInfo, userPrompt, requirements, projectDir, generatedFiles, totalFiles, filesCompleted, onProgress, onFileGenerated, onFileChunk, onError, onFileFixing, onFileFixed }) {
         const filePath = typeof fileInfo === 'string' ? fileInfo : fileInfo.path;
 
         if (!this._isValidFilePath(filePath)) {
@@ -165,24 +184,64 @@ export class ProjectGenerationService {
                 onFileChunk
             });
 
+            let finalCode = result.code;
+            let finalValidation = result.validation;
+
+            // ── Agentic fix loop: if validation failed, use LLM to fix errors ──
+            if (!finalValidation.isValid && finalValidation.errors && finalValidation.errors.length > 0) {
+                logger.info(`Validation failed for ${filePath} (${finalValidation.errors.length} errors) — starting agent fix`);
+
+                const fixResult = await this.agentFixer.fixFileWithFeedback({
+                    code: finalCode,
+                    filePath,
+                    errors: finalValidation.errors,
+                    warnings: finalValidation.warnings || [],
+                    userPrompt,
+                    contextFiles: generatedFiles,
+                    onFixAttempt: (data) => {
+                        onFileFixing?.(data);
+                    },
+                });
+
+                finalCode = fixResult.code;
+                finalValidation = fixResult.validation;
+
+                // Write the fixed version to disk
+                this._writeFile(projectDir, filePath, finalCode);
+
+                if (fixResult.fixed) {
+                    logger.info(`Agent fix succeeded for ${filePath} in ${fixResult.attempts} attempt(s)`);
+                    onFileFixed?.({
+                        path: filePath,
+                        content: finalCode,
+                        validation: {
+                            is_valid: finalValidation.isValid,
+                            errors: finalValidation.errors || [],
+                            warnings: finalValidation.warnings || [],
+                            fixes_applied: [...(finalValidation.fixesApplied || []), `Agent fix (${fixResult.attempts} attempt(s))`]
+                        }
+                    });
+                }
+            }
+
             // Track for inter-file context
-            generatedFiles[filePath] = result.code;
+            generatedFiles[filePath] = finalCode;
 
             onFileGenerated?.({
                 path: filePath,
-                content: result.code,
+                content: finalCode,
                 validation: {
-                    is_valid: result.validation.isValid,
-                    errors: result.validation.errors || [],
-                    warnings: result.validation.warnings || [],
-                    fixes_applied: result.validation.fixesApplied || []
+                    is_valid: finalValidation.isValid,
+                    errors: finalValidation.errors || [],
+                    warnings: finalValidation.warnings || [],
+                    fixes_applied: finalValidation.fixesApplied || []
                 }
             });
         } catch (error) {
             logger.error(`Error generating ${filePath}: ${error.message}`);
             onError?.({ path: filePath, error: error.message, recoverable: true });
 
-            // Fallback to template
+            // Fallback to template (absolute last resort)
             try {
                 const fallbackCode = getTemplate(filePath, {
                     projectType: requirements.projectType,
@@ -242,8 +301,8 @@ export class ProjectGenerationService {
                     },
                     (chunk, accumulated) => {
                         fullText = accumulated;
-                        // Emit streaming chunks to frontend
-                        onFileChunk?.({ path: filePath, chunk, accumulated });
+                        // Emit only the delta chunk to frontend (client accumulates)
+                        onFileChunk?.({ path: filePath, chunk });
                     }
                 );
 
@@ -302,6 +361,70 @@ export class ProjectGenerationService {
         this._writeFile(projectDir, filePath, code);
 
         return { code, validation: validationResult };
+    }
+
+    /**
+     * Post-generation review: validate all files together and fix cross-file issues
+     */
+    async _postGenerationReview({ generatedFiles, requirements, userPrompt, projectDir, onFileFixed, onFileFixing, onFileGenerated }) {
+        try {
+            const framework = requirements.framework || 'vanilla-js';
+            const structureResult = this.validator.validateProjectStructure(generatedFiles, framework);
+
+            if (structureResult.isValid) {
+                logger.info('Post-generation review: all cross-file checks passed');
+                return;
+            }
+
+            logger.info(`Post-generation review: ${structureResult.warnings.length} cross-file issue(s) found`);
+
+            const fixedFiles = await this.agentFixer.fixCrossFileIssues({
+                files: generatedFiles,
+                structureErrors: structureResult.warnings,
+                userPrompt,
+                onFixAttempt: (data) => {
+                    onFileFixing?.(data);
+                },
+            });
+
+            // Emit updated files
+            for (const [filePath, { code, validation }] of Object.entries(fixedFiles)) {
+                // Update in-memory files
+                generatedFiles[filePath] = code;
+
+                // Write to disk
+                this._writeFile(projectDir, filePath, code);
+
+                // Notify frontend
+                onFileFixed?.({
+                    path: filePath,
+                    content: code,
+                    validation: {
+                        is_valid: validation.isValid,
+                        errors: validation.errors || [],
+                        warnings: validation.warnings || [],
+                        fixes_applied: [...(validation.fixesApplied || []), 'Cross-file agent fix']
+                    }
+                });
+
+                // Also re-emit as file_generated so the frontend replaces the content
+                onFileGenerated?.({
+                    path: filePath,
+                    content: code,
+                    validation: {
+                        is_valid: validation.isValid,
+                        errors: validation.errors || [],
+                        warnings: validation.warnings || [],
+                        fixes_applied: [...(validation.fixesApplied || []), 'Cross-file agent fix']
+                    }
+                });
+            }
+
+            logger.info(`Post-generation review: fixed ${Object.keys(fixedFiles).length} file(s)`);
+        } catch (e) {
+            logger.error(`Post-generation review failed: ${e.message}`);
+            // Non-fatal — generation is still complete
+        }
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

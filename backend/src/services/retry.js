@@ -87,12 +87,12 @@ export class RetryHandler {
             await new Promise(resolve => setTimeout(resolve, delay));
         }
 
-        const promptToUse = isRetry
-            ? `${prompt}\n\nPREVIOUS ATTEMPT FAILED. Generate ONLY the code for the file. No explanations, no markdown.`
-            : prompt;
-
+        // On retries, we still use the original prompt — the agentic fixer will
+        // handle error-specific feedback after initial generation + validation.
+        // This keeps the retry handler focused on LLM call reliability (network,
+        // rate limits, empty responses) rather than code quality.
         try {
-            const result = await generationFunc(promptToUse);
+            const result = await generationFunc(prompt);
 
             if (result.code && result.code.length > 10) {
                 const hasValidCode = this._validateCodeContent(result.code, filePath);
@@ -100,7 +100,7 @@ export class RetryHandler {
                     this.circuitBreaker.recordSuccess();
                     return { success: true, code: result.code };
                 }
-                console.log(`Code validation failed for ${filePath}, retrying...`);
+                console.log(`Code content validation failed for ${filePath}, retrying...`);
             }
 
             // Retry

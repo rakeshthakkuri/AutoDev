@@ -36,3 +36,99 @@
 {"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T22:49:58.129Z"}
 {"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T22:49:58.131Z"}
 {"level":"info","message":"Client disconnected: T7G9nD4IA3pdNpKRAAAH","timestamp":"2026-02-08T22:50:02.309Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-08T23:01:27.329Z"}
+{"level":"info","message":"Client connected: ehuqukSLy6lCAXDsAAAB","timestamp":"2026-02-08T23:01:28.696Z"}
+{"level":"info","message":"Client connected: D4tS8aqPxrEcz04NAAAD","timestamp":"2026-02-08T23:01:32.748Z"}
+{"level":"info","message":"Client disconnected: ehuqukSLy6lCAXDsAAAB","timestamp":"2026-02-08T23:01:35.373Z"}
+{"level":"info","message":"Client connected: UtFkYDdL7CcK-bqEAAAF","timestamp":"2026-02-08T23:28:23.125Z"}
+{"level":"info","message":"Client disconnected: UtFkYDdL7CcK-bqEAAAF","timestamp":"2026-02-08T23:28:46.229Z"}
+{"level":"info","message":"Client connected: 1MeZ2ZwQnOvcfT4jAAAH","timestamp":"2026-02-08T23:29:21.746Z"}
+{"level":"info","message":"Client disconnected: 474BlFd2dOKEOh1vAAAD","timestamp":"2026-02-08T23:29:22.425Z"}
+{"level":"info","message":"Client disconnected: 1MeZ2ZwQnOvcfT4jAAAH","timestamp":"2026-02-08T23:29:22.426Z"}
+{"level":"info","message":"Client connected: 2WjraBkvM5gL0zmFAAAJ","timestamp":"2026-02-08T23:29:23.450Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T23:29:24.844Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T23:29:24.844Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T23:29:33.642Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T23:29:33.642Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T23:29:34.464Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-08T23:29:34.465Z"}
+{"level":"error","message":"Forced shutdown after timeout","timestamp":"2026-02-08T23:29:34.846Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-08T23:30:55.170Z"}
+{"level":"info","message":"Client connected: AAEVN991u0v7bkXSAAAB","timestamp":"2026-02-08T23:30:57.932Z"}
+{"level":"info","message":"Client disconnected: AAEVN991u0v7bkXSAAAB","timestamp":"2026-02-08T23:32:55.692Z"}
+{"level":"info","message":"Client connected: i-ViHJI4eeZcqaIvAAAD","timestamp":"2026-02-08T23:32:55.742Z"}
+{"level":"info","message":"Client disconnected: i-ViHJI4eeZcqaIvAAAD","timestamp":"2026-02-08T23:34:38.669Z"}
+{"level":"info","message":"Client connected: CL8_ITZPp1KqWFawAAAF","timestamp":"2026-02-08T23:34:38.733Z"}
+{"level":"info","message":"Client disconnected: CL8_ITZPp1KqWFawAAAF","timestamp":"2026-02-08T23:35:36.413Z"}
+{"level":"info","message":"Client connected: uYxvXKMqJcLMpcDzAAAH","timestamp":"2026-02-08T23:35:36.464Z"}
+{"level":"info","message":"Client disconnected: uYxvXKMqJcLMpcDzAAAH","timestamp":"2026-02-08T23:42:16.572Z"}
+{"level":"info","message":"Client connected: p9AvgJRHu4L8x04nAAAJ","timestamp":"2026-02-08T23:42:16.779Z"}
+{"level":"info","message":"Client disconnected: p9AvgJRHu4L8x04nAAAJ","timestamp":"2026-02-08T23:43:33.663Z"}
+{"level":"info","message":"Client connected: wcmcAY_gE7Hu-QEaAAAL","timestamp":"2026-02-08T23:43:33.708Z"}
+{"level":"info","message":"POST /api/analyze 200 2437ms","timestamp":"2026-02-08T23:43:54.941Z"}
+{"level":"info","message":"POST /api/plan 200 3943ms","timestamp":"2026-02-08T23:43:58.896Z"}
+{"complexity":"simple","fileCount":3,"framework":"vanilla-js","level":"info","message":"NEW GENERATION REQUEST","styling":"plain-css","timestamp":"2026-02-08T23:43:58.902Z","userPrompt":"Create a todo app"}
+{"level":"info","message":"Client connected: 7LxzIqjjpjzwEdrZAAAN","timestamp":"2026-02-08T23:45:26.445Z"}
+{"level":"info","message":"Client connected: InBEmRTfTfKDjnoXAAAP","timestamp":"2026-02-08T23:48:40.189Z"}
+{"level":"info","message":"Client connected: pmvYpwFpxqLo-Oy7AAAR","timestamp":"2026-02-08T23:48:40.902Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:06:10.033Z"}
+{"level":"info","message":"Client connected: iyXmFgIkjgTrkqdwAAAB","timestamp":"2026-02-09T00:06:10.904Z"}
+{"level":"info","message":"Client connected: FMofLCldhomHFv5gAAAD","timestamp":"2026-02-09T00:07:12.170Z"}
+{"level":"info","message":"Client disconnected: FMofLCldhomHFv5gAAAD","timestamp":"2026-02-09T00:07:16.026Z"}
+{"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-02-09T00:07:30.068Z"}
+{"level":"info","message":"Client disconnected: iyXmFgIkjgTrkqdwAAAB","timestamp":"2026-02-09T00:07:30.068Z"}
+{"level":"info","message":"HTTP server closed","timestamp":"2026-02-09T00:07:30.070Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:07:36.102Z"}
+{"level":"info","message":"Client connected: Yqco6ZUO0DXAlm29AAAB","timestamp":"2026-02-09T00:07:53.969Z"}
+{"level":"info","message":"Client disconnected: Yqco6ZUO0DXAlm29AAAB","timestamp":"2026-02-09T00:07:56.381Z"}
+{"level":"info","message":"Client connected: 3twQDkiJdqlfo3d8AAAD","timestamp":"2026-02-09T00:08:00.456Z"}
+{"level":"info","message":"Client disconnected: 3twQDkiJdqlfo3d8AAAD","timestamp":"2026-02-09T00:12:05.387Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:18:39.154Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:19:04.281Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:19:11.058Z"}
+{"error":"io is not defined","level":"error","message":"Uncaught exception","stack":"ReferenceError: io is not defined\n    at gracefulShutdown (file:///Users/rakeshpatel/Desktop/AI%20Project%20generator/backend/src/index.js:295:5)\n    at process.<anonymous> (file:///Users/rakeshpatel/Desktop/AI%20Project%20generator/backend/src/index.js:313:29)\n    at process.emit (node:events:519:28)","timestamp":"2026-02-09T00:19:11.060Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:22:18.114Z"}
+{"level":"info","message":"POST /api/analyze 200 2620ms","timestamp":"2026-02-09T00:36:15.334Z"}
+{"level":"info","message":"POST /api/plan 200 4171ms","timestamp":"2026-02-09T00:36:19.510Z"}
+{"complexity":"simple","fileCount":5,"framework":"vanilla-js","level":"info","message":"NEW GENERATION REQUEST","styling":"plain-css","timestamp":"2026-02-09T00:36:19.524Z","userPrompt":"Create a modern landing page with hero section, features, and pricing"}
+{"level":"info","message":"POST /api/generate 200 87559ms","timestamp":"2026-02-09T00:37:47.079Z"}
+{"level":"info","message":"POST /api/analyze 200 2599ms","timestamp":"2026-02-09T00:39:17.236Z"}
+{"level":"info","message":"POST /api/plan 200 6490ms","timestamp":"2026-02-09T00:39:23.733Z"}
+{"complexity":"intermediate","fileCount":10,"framework":"vanilla-js","level":"info","message":"NEW GENERATION REQUEST","styling":"tailwind","timestamp":"2026-02-09T00:39:23.741Z","userPrompt":"Make a portfolio website with project gallery and contact form"}
+{"level":"info","message":"POST /api/generate 200 211181ms","timestamp":"2026-02-09T00:42:54.922Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:47:28.139Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:47:28.441Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:48:45.314Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:48:45.596Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:48:55.462Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:48:55.643Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:48:59.779Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:48:59.994Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:49:05.607Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:49:05.784Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:49:14.761Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:49:14.920Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:49:36.833Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:49:37.021Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:49:47.182Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:49:47.351Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:49:59.507Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:49:59.675Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:50:12.473Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:50:12.654Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:52:27.282Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:52:27.561Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:53:41.446Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:53:41.605Z"}
+{"level":"info","message":"POST /api/analyze 200 2532ms","timestamp":"2026-02-09T00:53:50.750Z"}
+{"level":"info","message":"POST /api/plan 200 4629ms","timestamp":"2026-02-09T00:53:55.383Z"}
+{"complexity":"simple","fileCount":7,"framework":"react","level":"info","message":"NEW GENERATION REQUEST","styling":"tailwind","timestamp":"2026-02-09T00:53:55.397Z","userPrompt":"Build a task manager with add, edit, delete, and filtering"}
+{"level":"info","message":"POST /api/generate 200 112051ms","timestamp":"2026-02-09T00:55:47.444Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:57:31.248Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:57:31.447Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:57:50.740Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:57:50.926Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:57:59.925Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:58:00.108Z"}
+{"level":"info","message":"SIGTERM received. Shutting down gracefully...","timestamp":"2026-02-09T00:58:23.790Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-02-09T00:58:23.948Z"}

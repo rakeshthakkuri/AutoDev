@@ -124,7 +124,7 @@ const FRAMEWORK_EXAMPLES = [
 export default function LandingPage() {
   const navigate = useNavigate();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const hasUnsavedChanges = GenerationStore((s) => s.hasUnsavedChanges);
+  const confirmDiscardChanges = GenerationStore((s) => s.confirmDiscardChanges);
   const loadProjectState = GenerationStore((s) => s.loadProject);
 
   const features = [
@@ -142,9 +142,7 @@ export default function LandingPage() {
   const handleGetStarted = () => navigate('/generate');
 
   const handleLoadProject = (project: ProjectData) => {
-    if (hasUnsavedChanges()) {
-      if (!window.confirm('You have unsaved changes. Loading will discard them. Continue?')) return;
-    }
+    if (!confirmDiscardChanges('You have unsaved changes. Loading will discard them. Continue?')) return;
     loadProjectState(project.files, project.editedFiles, project.prompt);
     navigate('/generate');
   };

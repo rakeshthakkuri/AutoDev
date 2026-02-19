@@ -1,3 +1,4 @@
+import type { ComponentType } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import LandingPage from './components/LandingPage';
@@ -8,11 +9,18 @@ import BackendConnectionBanner from './components/BackendConnectionBanner';
 import { useSettingsStore } from './store/settings';
 import './App.css';
 
+function SafePage({ Page }: { Page: ComponentType | null | undefined }) {
+  if (Page == null) {
+    return <div style={{ padding: '2rem', textAlign: 'center', color: '#888' }}>Loading...</div>;
+  }
+  return <Page />;
+}
+
 function AnimatedRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/generate" element={<GenerationPage />} />
+      <Route path="/" element={<SafePage Page={LandingPage} />} />
+      <Route path="/generate" element={<SafePage Page={GenerationPage} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

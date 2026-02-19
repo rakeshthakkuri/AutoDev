@@ -1,4 +1,4 @@
-import JSZip from 'jszip';
+import { downloadZip as downloadZipApi } from './api';
 
 /**
  * Build a ZIP from a map of file paths to content and trigger browser download.
@@ -9,16 +9,22 @@ export async function downloadProjectAsZip(
   getContent: (path: string) => string,
   filename = 'project.zip'
 ): Promise<void> {
-  const zip = new JSZip();
+  // Collect all file contents
+  const filesWithContent: Record<string, string> = {};
   for (const path of Object.keys(files)) {
-    const content = getContent(path);
-    zip.file(path, content);
+    filesWithContent[path] = getContent(path);
   }
-  const blob = await zip.generateAsync({ type: 'blob' });
+
+  // Call backend to generate ZIP
+  const blob = await downloadZipApi({ files: filesWithContent, filename });
+
+  // Trigger download
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  
+  // Clean up
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 }

@@ -26,6 +26,12 @@
 
 .error-details { margin-top: var(--space-3); padding: var(--space-3); background: var(--code-bg); border-radius: var(--radius-md); max-height: 200px; overflow-y: auto; }
 .error-details pre { margin: 0; font-size: var(--text-xs); color: var(--text-muted); white-space: pre-wrap; word-break: break-all; font-family: var(--font-mono); }
+.error-partial-success { margin: var(--space-2) 0 0; font-size: var(--text-sm); color: var(--text-secondary); }
+
+/* Fallback warning (analyze/plan used default) */
+.fallback-warning-banner { padding: var(--space-3) var(--space-4); background: var(--accent-subtle); border: 1px solid var(--accent-border); border-radius: var(--radius-lg); font-size: var(--text-sm); color: var(--text-secondary); }
+.fallback-warning-banner p { margin: 0 0 var(--space-1); }
+.fallback-warning-banner p:last-child { margin-bottom: 0; }
 
 .file-errors { padding: var(--space-4); background: var(--error-bg); border: 1px solid var(--error-border-subtle); border-radius: var(--radius-lg); }
 .file-errors h4 { margin: 0 0 var(--space-3) 0; font-size: var(--text-sm); color: var(--color-error); }

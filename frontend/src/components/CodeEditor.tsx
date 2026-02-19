@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import Editor from '@monaco-editor/react';
+import Editor, { useMonaco } from '@monaco-editor/react';
 import { Save, RotateCcw, Keyboard, Map, Loader2, ChevronRight } from 'lucide-react';
 import { GenerationStore } from '../store/generation';
 import { useSettingsStore } from '../store/settings';
@@ -68,7 +68,83 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
     getFileContent,
     streamingFile,
     streamingContent,
+    validationResults,
   } = GenerationStore();
+
+  const monaco = useMonaco();
+
+  // Disable Monaco's built-in TypeScript/JavaScript diagnostics to avoid false syntax errors.
+  // The editor runs without full project context (no tsconfig, no node_modules), so it often
+  // reports errors for valid code (e.g. unresolved imports, JSX in .js, strict types).
+  // We only show validation from our backend (validationResults) via setModelMarkers below.
+  useEffect(() => {
+    if (!monaco) return;
+    const js = (monaco.languages as any).typescript?.javascriptDefaults;
+    const ts = (monaco.languages as any).typescript?.typescriptDefaults;
+    if (js?.setDiagnosticsOptions) {
+      js.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: true });
+    }
+    if (ts?.setDiagnosticsOptions) {
+      ts.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: true });
+    }
+  }, [monaco]);
+
+  // Sync validation markers to Monaco
+  useEffect(() => {
+    if (!monaco || !editorRef.current || !file) return;
+
+    const validation = validationResults[file];
+    const model = editorRef.current.getModel();
+    if (!model || !validation) {
+      if (model) monaco.editor.setModelMarkers(model, 'owner', []);
+      return;
+    }
+
+    // If file is edited, we might want to clear markers since they are for the original version
+    if (file in editedFiles) {
+      monaco.editor.setModelMarkers(model, 'owner', []);
+      return;
+    }
+
+    const markers: any[] = [];
+
+    // Add errors
+    if (validation.errors) {
+      validation.errors.forEach((err: string) => {
+        // Try to find line number in error message (e.g., "at line 5")
+        const lineMatch = err.match(/line\s+(\d+)/i);
+        const lineNumber = lineMatch ? parseInt(lineMatch[1], 10) : 1;
+        
+        markers.push({
+          message: err,
+          severity: monaco.MarkerSeverity.Error,
+          startLineNumber: lineNumber,
+          startColumn: 1,
+          endLineNumber: lineNumber,
+          endColumn: model.getLineMaxColumn(lineNumber),
+        });
+      });
+    }
+
+    // Add warnings
+    if (validation.warnings) {
+      validation.warnings.forEach((warn: string) => {
+        const lineMatch = warn.match(/line\s+(\d+)/i);
+        const lineNumber = lineMatch ? parseInt(lineMatch[1], 10) : 1;
+
+        markers.push({
+          message: warn,
+          severity: monaco.MarkerSeverity.Warning,
+          startLineNumber: lineNumber,
+          startColumn: 1,
+          endLineNumber: lineNumber,
+          endColumn: model.getLineMaxColumn(lineNumber),
+        });
+      });
+    }
+
+    monaco.editor.setModelMarkers(model, 'owner', markers);
+  }, [monaco, file, validationResults, editedFiles]);
 
   const appTheme = useSettingsStore((s) => s.theme);
 
@@ -80,6 +156,7 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
     return formatFileSize(displayContent);
   }, [displayContent]);
 
+  // Sync from store when file or files/editedFiles change
   useEffect(() => {
     if (!file) {
       setEditorContent('');
@@ -89,7 +166,14 @@ export default function CodeEditor({ file, content }: CodeEditorProps) {
     const currentContent = getFileContent(file);
     setEditorContent(currentContent);
     setIsModified(file in editedFiles);
-  }, [file, files, editedFiles]);
+  }, [file, files, editedFiles, getFileContent]);
+
+  // When parent passes updated content (e.g. after fix_cross_file), keep editor in sync
+  useEffect(() => {
+    if (file && content !== undefined) {
+      setEditorContent(content);
+    }
+  }, [file, content]);
 
   useEffect(() => {
     if (isStreaming && editorRef.current) {

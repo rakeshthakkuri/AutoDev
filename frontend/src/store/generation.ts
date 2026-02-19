@@ -1,44 +1,19 @@
 import { create } from 'zustand';
-import axios from 'axios';
+import toast from 'react-hot-toast';
+import type {
+  ErrorDetails,
+  FileError,
+  ValidationResult,
+  GenerationPlan,
+  CurrentPhase,
+  FixingFileState,
+  GenerationMetrics,
+} from '../types';
+import { getHealth, analyzePrompt, getPlan, generateProjectStream } from '../services/api';
 
-// In dev, use same origin so Vite proxy forwards to backend (5001). In prod, use env or default.
-const API_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL || 'http://localhost:5001');
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface ErrorDetails {
-  code?: string;
-  message: string;
-  details?: Record<string, any>;
-}
-
-interface FileError {
-  path: string;
-  error: string;
-  attempts: number;
-}
-
-interface ValidationResult {
-  is_valid: boolean;
-  errors: string[];
-  warnings: string[];
-  fixes_applied: string[];
-}
-
-interface PlannedFile {
-  path: string;
-  purpose: string;
-}
-
-interface GenerationPlan {
-  files: PlannedFile[];
-  techStack: string[];
-  framework: string;
-  stylingFramework: string;
-}
+// ─── Generation state (Zustand store shape) ───────────────────────────────────
 
 interface GenerationState {
-  // ── Project state
   files: Record<string, string>;
   editedFiles: Record<string, string>;
   isGenerating: boolean;
@@ -47,23 +22,21 @@ interface GenerationState {
   backendConnected: boolean;
   fileErrors: Record<string, FileError>;
   validationResults: Record<string, ValidationResult>;
-  metrics: { duration?: number; filesGenerated?: number; validation?: any; retries?: any } | null;
+  metrics: GenerationMetrics | null;
   currentPrompt: string;
-
-  // ── Streaming state
-  streamingFile: string | null;       // Currently streaming file path
-  streamingContent: string;           // Accumulated streaming content (built from deltas)
-  generationPlan: GenerationPlan | null;  // Plan received before generation
-
-  // ── Agentic fix state
-  fixingFiles: Record<string, { attempt: number; totalAttempts: number; errors: string[] }>;
-
-  // ── User preferences
-  selectedFramework: string;          // 'auto' | 'vanilla-js' | 'react' | ...
-  selectedStyling: string;            // 'auto' | 'tailwind' | 'plain-css' | ...
-  selectedComplexity: string;         // 'simple' | 'intermediate' | 'advanced'
-
-  // ── Actions
+  streamingFile: string | null;
+  streamingContent: string;
+  generationPlan: GenerationPlan | null;
+  /** Shown when analyze used fallback (e.g. could not parse AI response). */
+  analysisFallbackWarning: string | null;
+  /** Shown when plan used fallback (e.g. default file list). */
+  planFallbackWarning: string | null;
+  fixingFiles: Record<string, FixingFileState>;
+  currentPhase: CurrentPhase;
+  currentFile: string | null;
+  selectedFramework: string;
+  selectedStyling: string;
+  selectedComplexity: string;
   generateProject: (prompt: string) => Promise<void>;
   clearError: () => void;
   retryGeneration: (prompt: string) => Promise<void>;
@@ -71,6 +44,8 @@ interface GenerationState {
   revertFileEdit: (path: string) => void;
   getFileContent: (path: string) => string;
   hasUnsavedChanges: () => boolean;
+  /** Returns true if no unsaved changes or user confirmed discard. Use before load/reset/generate. */
+  confirmDiscardChanges: (message?: string) => boolean;
   clearEdits: () => void;
   loadProject: (files: Record<string, string>, editedFiles?: Record<string, string>, prompt?: string) => void;
   resetProject: () => void;
@@ -79,65 +54,6 @@ interface GenerationState {
   setSelectedFramework: (framework: string) => void;
   setSelectedStyling: (styling: string) => void;
   setSelectedComplexity: (complexity: string) => void;
-}
-
-// ─── SSE Stream Parser ───────────────────────────────────────────────────────
-
-interface SSEEvent {
-  event: string;
-  data: string;
-}
-
-/**
- * Parse SSE events from a ReadableStream.
- * Calls `onEvent` for each complete event received.
- */
-async function parseSSEStream(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  onEvent: (evt: SSEEvent) => void,
-  signal?: AbortSignal,
-) {
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  try {
-    while (true) {
-      if (signal?.aborted) break;
-
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // SSE events are separated by double newlines
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() || '';
-
-      for (const part of parts) {
-        if (!part.trim()) continue;
-
-        let eventName = '';
-        let eventData = '';
-
-        for (const line of part.split('\n')) {
-          if (line.startsWith('event: ')) {
-            eventName = line.slice(7);
-          } else if (line.startsWith('data: ')) {
-            eventData = line.slice(6);
-          }
-        }
-
-        if (eventName && eventData) {
-          onEvent({ event: eventName, data: eventData });
-        }
-      }
-    }
-  } catch (err: any) {
-    // AbortError is expected when cancelling
-    if (err.name !== 'AbortError') {
-      throw err;
-    }
-  }
 }
 
 // ─── Store ───────────────────────────────────────────────────────────────────
@@ -161,27 +77,28 @@ export const GenerationStore = create<GenerationState>((set, get) => {
     streamingFile: null,
     streamingContent: '',
     generationPlan: null,
+    analysisFallbackWarning: null,
+    planFallbackWarning: null,
     fixingFiles: {},
+    currentPhase: 'complete',
+    currentFile: null,
     selectedFramework: 'auto',
     selectedStyling: 'auto',
     selectedComplexity: 'simple',
 
     checkHealth: async () => {
       try {
-        const res = await fetch(`${API_URL}/health`, { method: 'GET', signal: AbortSignal.timeout(3000) });
-        set({ backendConnected: res.ok });
+        const ok = await getHealth();
+        set({ backendConnected: ok });
       } catch {
         set({ backendConnected: false });
       }
     },
 
     generateProject: async (prompt: string) => {
-      const { hasUnsavedChanges, selectedFramework, selectedStyling, selectedComplexity } = get();
+      const { confirmDiscardChanges, selectedFramework, selectedStyling, selectedComplexity } = get();
 
-      if (hasUnsavedChanges()) {
-        const confirmed = window.confirm('You have unsaved changes. Regenerating will discard all edits. Continue?');
-        if (!confirmed) return;
-      }
+      if (!confirmDiscardChanges('You have unsaved changes. Regenerating will discard all edits. Continue?')) return;
 
       set({
         isGenerating: true,
@@ -196,113 +113,105 @@ export const GenerationStore = create<GenerationState>((set, get) => {
         streamingFile: null,
         streamingContent: '',
         generationPlan: null,
+        analysisFallbackWarning: null,
+        planFallbackWarning: null,
         fixingFiles: {},
       });
 
+      const abortController = new AbortController();
+      activeAbortController = abortController;
+      const signal = abortController.signal;
+
       try {
-        // Health check
-        try {
-          await axios.get(`${API_URL}/health`, { timeout: 5000 });
-          set({ backendConnected: true });
-        } catch {
+        const ok = await getHealth(signal);
+        if (!ok) {
           set({ backendConnected: false });
           throw new Error('Backend server is not responding. Please ensure the server is running on port 5001.');
         }
+        set({ backendConnected: true });
 
-        // Step 1: Analyze (pass framework/styling preferences)
-        const analyzeRes = await axios.post(
-          `${API_URL}/api/analyze`,
+        const analyzeRes = await analyzePrompt(
           { prompt, framework: selectedFramework, styling: selectedStyling },
-          { timeout: 60000 }
+          { signal }
         );
-        const requirements = {
-          ...analyzeRes.data,
-          complexity: selectedComplexity,
-        };
+        const sessionId = analyzeRes.sessionId;
+        const { sessionId: _sid, ...analyzePayload } = analyzeRes;
+        const requirements = { ...analyzePayload, complexity: selectedComplexity };
+        const analysisWarning =
+          (analyzeRes as any).usedFallback && (analyzeRes as any).warning
+            ? (analyzeRes as any).warning
+            : null;
+        set({ progress: 15, currentPhase: 'planning', analysisFallbackWarning: analysisWarning });
 
-        set({ progress: 15 });
+        const plan = await getPlan({ requirements }, { signal });
+        const planWarning =
+          (plan as any).usedFallback && (plan as any).warning
+            ? (plan as any).warning
+            : null;
+        set({ progress: 25, currentPhase: 'generating', planFallbackWarning: planWarning });
 
-        // Step 2: Plan
-        const planRes = await axios.post(
-          `${API_URL}/api/plan`,
-          { requirements },
-          { timeout: 60000 }
-        );
-        const plan = planRes.data;
+        await generateProjectStream(
+          { prompt, requirements, plan },
+          {
+            sessionId,
+            signal,
+            onEvent: (eventName, data) => {
+              try {
+                const d = data as Record<string, unknown>;
+                if ((eventName as string) === 'cancelation' || (d && (d as { type?: string }).type === 'cancelation')) return;
 
-        set({ progress: 25 });
-
-        // Step 3: Generate via SSE stream
-        const abortController = new AbortController();
-        activeAbortController = abortController;
-
-        const response = await fetch(`${API_URL}/api/generate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, requirements, plan }),
-          signal: abortController.signal,
-        });
-
-        if (!response.ok) {
-          const errorBody = await response.json().catch(() => ({ error: 'Generation request failed' }));
-          throw new Error(errorBody.error || `Server error ${response.status}`);
-        }
-
-        const reader = response.body!.getReader();
-
-        await parseSSEStream(reader, (evt) => {
-          try {
-            const data = JSON.parse(evt.data);
-
-            switch (evt.event) {
+                switch (eventName) {
               case 'status':
-                set({ progress: data.progress ?? get().progress });
+                set((state) => ({
+                  progress: (d.progress as number) ?? state.progress,
+                  currentFile: (d.currentFile as string) ?? state.currentFile,
+                }));
                 break;
 
               case 'generation_plan':
-                set({ generationPlan: data as GenerationPlan });
+                set({ generationPlan: d as unknown as GenerationPlan });
                 break;
 
-              case 'file_chunk': {
-                // Accumulate deltas client-side
-                const currentState = get();
-                const isSameFile = currentState.streamingFile === data.path;
-                set({
-                  streamingFile: data.path,
-                  streamingContent: (isSameFile ? currentState.streamingContent : '') + data.chunk,
-                });
-                break;
-              }
-
-              case 'file_generated':
+              case 'file_chunk':
                 set((state) => ({
-                  files: { ...state.files, [data.path]: data.content },
-                  validationResults: {
-                    ...state.validationResults,
-                    [data.path]: data.validation || { is_valid: true, errors: [], warnings: [], fixes_applied: [] }
-                  },
-                  streamingFile: state.streamingFile === data.path ? null : state.streamingFile,
-                  streamingContent: state.streamingFile === data.path ? '' : state.streamingContent,
+                  streamingFile: d.path as string,
+                  streamingContent: (state.streamingFile === d.path ? state.streamingContent : '') + (d.chunk as string),
                 }));
                 break;
+
+              case 'file_generated': {
+                const validation = (d.validation as ValidationResult) || { is_valid: true, errors: [], warnings: [], fixes_applied: [] };
+                if (d.fallback) {
+                  (validation as ValidationResult).fallback = true;
+                  (validation as ValidationResult).fallbackReason = (d.fallbackReason as string) || 'Template fallback used';
+                }
+                set((state) => ({
+                  files: { ...state.files, [d.path as string]: d.content as string },
+                  validationResults: { ...state.validationResults, [d.path as string]: validation },
+                  streamingFile: state.streamingFile === d.path ? null : state.streamingFile,
+                  streamingContent: state.streamingFile === d.path ? '' : state.streamingContent,
+                }));
+                break;
+              }
 
               case 'file_fixing':
                 set((state) => ({
                   fixingFiles: {
                     ...state.fixingFiles,
-                    [data.path]: { attempt: data.attempt, totalAttempts: data.totalAttempts, errors: data.errors || [] }
+                    [d.path as string]: { attempt: d.attempt as number, totalAttempts: d.totalAttempts as number, errors: (d.errors as string[]) || [] }
                   }
                 }));
                 break;
 
               case 'file_fixed':
                 set((state) => {
-                  const { [data.path]: _, ...remainingFixing } = state.fixingFiles;
+                  const pathKey = d.path as string;
+                  const { [pathKey]: _, ...remainingFixing } = state.fixingFiles;
                   return {
-                    files: { ...state.files, [data.path]: data.content },
+                    files: { ...state.files, [pathKey]: d.content as string },
                     validationResults: {
                       ...state.validationResults,
-                      [data.path]: data.validation || { is_valid: true, errors: [], warnings: [], fixes_applied: [] }
+                      [pathKey]: (d.validation as ValidationResult) || { is_valid: true, errors: [], warnings: [], fixes_applied: [] }
                     },
                     fixingFiles: remainingFixing,
                   };
@@ -313,67 +222,81 @@ export const GenerationStore = create<GenerationState>((set, get) => {
                 set((state) => ({
                   fileErrors: {
                     ...state.fileErrors,
-                    [data.path]: { path: data.path, error: data.error, attempts: data.attempts || 0 }
+                    [d.path as string]: { path: d.path as string, error: d.error as string, attempts: (d.attempts as number) || 0 }
                   }
                 }));
-                console.error(`File generation error for ${data.path}:`, data.error);
+                console.error(`File generation error for ${d.path}:`, d.error);
                 break;
 
               case 'generation_complete':
                 set({
                   isGenerating: false,
                   progress: 100,
-                  metrics: data.metrics || null,
+                  currentPhase: 'complete',
+                  currentFile: null,
+                  metrics: (d.metrics as GenerationMetrics) || null,
                   streamingFile: null,
                   streamingContent: '',
                   fixingFiles: {},
                 });
-                if (data.error) {
-                  set({ error: { code: data.error.code, message: data.error.message, details: data.error.details } });
+                if (d.error) {
+                  const err = d.error as Record<string, unknown>;
+                  set({ error: { code: err.code as string, message: err.message as string, details: err.details as Record<string, unknown> } });
                 } else {
                   set({ error: null });
-                  console.log('Download URL:', API_URL + data.downloadUrl);
                 }
                 break;
 
               case 'generation_error':
                 set({
                   isGenerating: false,
-                  error: { code: 'GENERATION_ERROR', message: data.error || 'Generation failed', details: { stack: data.details } },
+                  currentPhase: 'complete',
+                  currentFile: null,
+                  error: {
+                    code: 'GENERATION_ERROR',
+                    message: (d.error as string) || 'Generation failed',
+                    details: {
+                      stack: d.details,
+                      filesGenerated: d.filesGenerated,
+                      partialSuccess: d.partialSuccess,
+                    },
+                  },
                   streamingFile: null,
                   streamingContent: '',
                 });
                 break;
             }
           } catch (parseErr) {
-            console.error('Failed to parse SSE event:', evt, parseErr);
+            console.error('Failed to parse SSE event:', eventName, parseErr);
           }
-        }, abortController.signal);
+        }
+        } ).catch((err: unknown) => {
+          if (err && typeof err === 'object' && (err as { type?: string }).type === 'cancelation') return;
+          throw err;
+        });
 
-        // If stream ended without a generation_complete event, mark as done
         if (get().isGenerating) {
-          set({ isGenerating: false });
+          set({ isGenerating: false, currentPhase: 'complete', currentFile: null });
         }
 
-      } catch (error: any) {
-        // AbortError means user cancelled — don't show error
-        if (error?.name === 'AbortError') return;
+      } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') return;
+        if (typeof error === 'object' && error !== null && (error as { type?: string }).type === 'cancelation') return;
 
         console.error('Generation error:', error);
 
         let errorMessage = 'Failed to start generation.';
         let errorCode = 'NETWORK_ERROR';
 
-        if (error?.code === 'ERR_NETWORK' || error?.message?.includes('Network Error')) {
-          errorMessage = 'Cannot connect to backend server. Please ensure the server is running on http://localhost:5001';
-        } else if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
-          errorMessage = 'Request timed out. The backend server may be overloaded.';
-          errorCode = 'TIMEOUT_ERROR';
-        } else if (error?.response?.data?.error) {
-          errorMessage = typeof error.response.data.error === 'string' ? error.response.data.error : error.response.data.error.message || errorMessage;
-          errorCode = error.response.data.error.code || errorCode;
-        } else if (error?.message) {
-          errorMessage = error.message;
+        if (error instanceof Error) {
+          if (error.message?.includes('Network Error') || error.message?.includes('fetch')) {
+            errorMessage = 'Cannot connect to backend server. Please ensure the server is running on http://localhost:5001';
+          } else if (error.message?.includes('timeout') || error.name === 'AbortError') {
+            errorMessage = 'Request timed out. The backend server may be overloaded.';
+            errorCode = 'TIMEOUT_ERROR';
+          } else {
+            errorMessage = error.message;
+          }
         }
 
         set({
@@ -381,9 +304,10 @@ export const GenerationStore = create<GenerationState>((set, get) => {
           error: {
             code: errorCode,
             message: errorMessage,
-            details: error?.response?.data?.error?.details || { originalError: String(error) }
+            details: { originalError: String(error) }
           }
         });
+        toast.error(errorMessage);
       } finally {
         activeAbortController = null;
       }
@@ -418,6 +342,11 @@ export const GenerationStore = create<GenerationState>((set, get) => {
 
     hasUnsavedChanges: () => Object.keys(get().editedFiles).length > 0,
 
+    confirmDiscardChanges: (message = 'You have unsaved changes. Discard them?') => {
+      if (Object.keys(get().editedFiles).length === 0) return true;
+      return window.confirm(message);
+    },
+
     clearEdits: () => set({ editedFiles: {} }),
 
     loadProject: (files: Record<string, string>, editedFiles?: Record<string, string>, prompt?: string) => {
@@ -427,6 +356,8 @@ export const GenerationStore = create<GenerationState>((set, get) => {
         currentPrompt: prompt || '',
         isGenerating: false,
         progress: 100,
+        currentPhase: 'complete',
+        currentFile: null,
         error: null,
         fileErrors: {},
         validationResults: {},
@@ -444,6 +375,8 @@ export const GenerationStore = create<GenerationState>((set, get) => {
         editedFiles: {},
         isGenerating: false,
         progress: 0,
+        currentPhase: 'complete',
+        currentFile: null,
         error: null,
         fileErrors: {},
         validationResults: {},
@@ -457,13 +390,14 @@ export const GenerationStore = create<GenerationState>((set, get) => {
     },
 
     cancelGeneration: () => {
-      // Abort the SSE fetch — backend detects the closed connection
       if (activeAbortController) {
         activeAbortController.abort();
         activeAbortController = null;
       }
       set({
         isGenerating: false,
+        currentPhase: 'complete',
+        currentFile: null,
         streamingFile: null,
         streamingContent: '',
       });

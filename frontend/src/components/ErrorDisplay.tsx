@@ -38,15 +38,15 @@ export default function ErrorDisplay({ error, onRetry, onDismiss }: ErrorDisplay
     switch (code) {
       case 'NETWORK_ERROR':
         return [
-          'Ensure the backend server is running: `cd backend && python app.py`',
+          'Ensure the backend is running: `cd backend && npm run dev`',
           'Check if the server is accessible at http://localhost:5001',
           'Verify CORS settings if accessing from a different origin'
         ];
       case 'MODEL_LOAD_ERROR':
         return [
-          'Check if the model file exists in the models/ directory',
-          'Verify the model file path in backend/app.py',
-          'Ensure you have enough RAM (7GB+ recommended)'
+          'Check that GEMINI_API_KEY (or your configured provider key) is set in backend/.env',
+          'Check backend logs for LLM initialization errors',
+          'Restart the backend server (Node) and try again'
         ];
       case 'GENERATION_ERROR':
         return [
@@ -77,6 +77,9 @@ export default function ErrorDisplay({ error, onRetry, onDismiss }: ErrorDisplay
           <div>
             <h3>Error: {error.message}</h3>
             {error.code && <span className="error-code">{error.code}</span>}
+            {error.details?.partialSuccess && typeof error.details?.filesGenerated === 'number' && error.details.filesGenerated > 0 && (
+              <p className="error-partial-success">{error.details.filesGenerated} file{error.details.filesGenerated !== 1 ? 's' : ''} were generated before the error. You can retry or adjust your prompt.</p>
+            )}
           </div>
         </div>
         <div className="error-actions">

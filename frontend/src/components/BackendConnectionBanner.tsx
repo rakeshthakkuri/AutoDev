@@ -10,10 +10,9 @@ export default function BackendConnectionBanner() {
   const backendConnected = GenerationStore((s) => s.backendConnected);
   const checkHealth = GenerationStore((s) => s.checkHealth);
 
-  // Poll health every 10 seconds so the banner stays accurate
   useEffect(() => {
     checkHealth();
-    const interval = setInterval(checkHealth, 10_000);
+    const interval = setInterval(checkHealth, 15_000);
     return () => clearInterval(interval);
   }, [checkHealth]);
 

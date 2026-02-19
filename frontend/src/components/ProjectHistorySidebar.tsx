@@ -34,10 +34,8 @@ export default function ProjectHistorySidebar({ isOpen, onClose, onLoadProject }
   };
 
   const handleLoad = (project: ProjectData) => {
-    if (window.confirm('Load this project? Current unsaved changes will be lost.')) {
-      onLoadProject(project);
-      onClose();
-    }
+    onLoadProject(project);
+    onClose();
   };
 
   const handleExport = (project: ProjectData, e: React.MouseEvent) => {

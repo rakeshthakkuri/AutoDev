@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { RefreshCw, ExternalLink, Smartphone, Tablet, Monitor, Eye, Terminal, Loader2 } from 'lucide-react';
 import { GenerationStore } from '../store/generation';
-import { bundleProject, detectProjectType, ProjectType, clearCache } from '../services/bundler';
+import { bundleProject } from '../services/api';
+import type { ProjectType } from '../types';
 
 function escapeHtml(text: string): string {
   const div = document.createElement('div');
@@ -38,6 +39,7 @@ export default function LivePreview({ files }: LivePreviewProps) {
   const [bundlerErrors, setBundlerErrors] = useState<string[]>([]);
   const [bundlerWarnings, setBundlerWarnings] = useState<string[]>([]);
   const [showDevInstructions, setShowDevInstructions] = useState(false);
+  const [isOpeningNewTab, setIsOpeningNewTab] = useState(false);
   const { editedFiles, getFileContent, generationPlan } = GenerationStore();
 
   const getContent = useCallback((path: string) => getFileContent(path), [getFileContent]);
@@ -68,10 +70,8 @@ export default function LivePreview({ files }: LivePreviewProps) {
         return;
       }
 
-      const detectedType = detectProjectType(allFiles);
-      setProjectType(detectedType);
-
-      const bundled = bundleProject(allFiles);
+      const bundled = await bundleProject({ files: allFiles });
+      setProjectType(bundled.projectType);
       setBundlerErrors(bundled.errors);
       setBundlerWarnings(bundled.warnings);
 
@@ -106,19 +106,28 @@ export default function LivePreview({ files }: LivePreviewProps) {
     }
   }, [getAllFiles]);
 
-  useEffect(() => { renderPreview(); }, [renderPreview]);
+  useEffect(() => {
+    renderPreview();
+  }, [renderPreview, files]);
 
-  const handleRefresh = () => { clearCache(); renderPreview(); };
+  const handleRefresh = () => { renderPreview(); };
 
-  const handleOpenInNewTab = () => {
+  const handleOpenInNewTab = async () => {
     const allFiles = getAllFiles();
-    const bundled = bundleProject(allFiles);
-    if (bundled.html) {
-      const blob = new Blob([bundled.html], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      // Clean up blob URL after a short delay
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setIsOpeningNewTab(true);
+    try {
+      const bundled = await bundleProject({ files: allFiles });
+      if (bundled.html) {
+        const blob = new Blob([bundled.html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        // Clean up blob URL after a short delay
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }
+    } catch (err) {
+      console.error('Failed to open in new tab:', err);
+    } finally {
+      setIsOpeningNewTab(false);
     }
   };
 
@@ -187,23 +196,25 @@ export default function LivePreview({ files }: LivePreviewProps) {
           )}
 
           <button onClick={handleRefresh} title="Refresh preview" aria-label="Refresh preview"><RefreshCw size={14} /></button>
-          <button onClick={handleOpenInNewTab} title="Open in new tab" aria-label="Open preview in new tab"><ExternalLink size={14} /></button>
+          <button onClick={handleOpenInNewTab} disabled={isOpeningNewTab} title="Open in new tab" aria-label="Open preview in new tab">
+            {isOpeningNewTab ? <Loader2 size={14} className="spin" /> : <ExternalLink size={14} />}
+            {isOpeningNewTab && <span className="opening-label">Opening...</span>}
+          </button>
         </div>
       </div>
 
-      {/* Server framework notice */}
+      {/* Server framework: short note, expand for run command */}
       {isServerFramework && (
         <div className="server-framework-banner">
           <div className="banner-content">
             <Terminal size={14} />
-            <span>This {FRAMEWORK_LABELS[projectType]} project requires a dev server for full interactivity.</span>
-            <button className="banner-toggle" onClick={() => setShowDevInstructions(!showDevInstructions)}>
-              {showDevInstructions ? 'Hide' : 'Run locally'}
+            <span>Run locally for full {FRAMEWORK_LABELS[projectType]} experience.</span>
+            <button className="banner-toggle" onClick={() => setShowDevInstructions(!showDevInstructions)} type="button">
+              {showDevInstructions ? 'Hide' : 'Show command'}
             </button>
           </div>
           {showDevInstructions && (
             <div className="dev-instructions">
-              <p>Download the project and run:</p>
               <code>{getDevInstructions()}</code>
             </div>
           )}
@@ -235,7 +246,7 @@ export default function LivePreview({ files }: LivePreviewProps) {
         <iframe
           ref={iframeRef}
           title="preview"
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts"
           className={getIframeClassName()}
           style={getIframeStyle()}
         />

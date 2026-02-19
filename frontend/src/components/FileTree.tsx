@@ -9,6 +9,8 @@ interface ValidationResult {
   errors: string[];
   warnings: string[];
   fixes_applied: string[];
+  fallback?: boolean;
+  fallbackReason?: string;
 }
 
 interface TreeNode {
@@ -172,9 +174,9 @@ function FolderNode({
   const isFocused = focusedPath === node.path;
 
   let statusCls = '';
-  if (validation) {
+  if (validation && !isEdited) {
     if (!validation.is_valid && validation.errors?.length > 0) statusCls = 'status-error';
-    else if (validation.warnings?.length > 0) statusCls = 'status-warning';
+    else if (validation.fallback || validation.warnings?.length > 0) statusCls = 'status-warning';
   }
 
   const classNames = [
@@ -200,7 +202,9 @@ function FolderNode({
       aria-label={node.name}
       tabIndex={-1}
       title={
-        validation
+        validation?.fallback
+          ? `Template fallback: ${validation.fallbackReason || 'LLM failed'}`
+          : validation
           ? `Valid: ${validation.is_valid}, Errors: ${validation.errors?.length || 0}`
           : isPlanned
           ? 'Planned — not yet generated'
@@ -220,10 +224,10 @@ function FolderNode({
           <Wrench size={11} className="warning-icon" />
         </span>
       )}
-      {!isFixing && validation && !validation.is_valid && validation.errors?.length > 0 && (
+      {!isFixing && !isEdited && validation && !validation.is_valid && validation.errors?.length > 0 && (
         <span className="tree-file-status"><AlertCircle size={11} className="error-icon" /></span>
       )}
-      {!isFixing && validation?.is_valid && (
+      {!isFixing && !isEdited && validation?.is_valid && (
         <span className="tree-file-status"><CheckCircle size={11} className="valid-icon" /></span>
       )}
     </div>

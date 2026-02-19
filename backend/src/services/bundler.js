@@ -672,7 +672,7 @@ function buildServerFrameworkFallback(files, type) {
 }
 
 export function bundleServerFramework(files, type) {
-  const warnings = [`${type} requires a local dev server for full functionality. This is a static preview.`];
+  const warnings = [`Run locally for full ${type} support.`];
   const hasTailwind = usesTailwind(files);
 
   if (type === PROJECT_TYPES.NEXTJS) {

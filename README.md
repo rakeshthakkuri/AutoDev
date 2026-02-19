@@ -1,6 +1,6 @@
 # AI Code Generator
 
-A full-stack AI-powered code generator that creates web projects from natural language descriptions using Claude (Anthropic).
+A full-stack AI-powered code generator that creates web projects from natural language descriptions using Google Gemini 2.5 Flash.
 
 ## Features
 
@@ -10,21 +10,21 @@ A full-stack AI-powered code generator that creates web projects from natural la
 - 📁 File tree navigation
 - 💾 Download projects as ZIP files
 - 🎨 Modern, responsive UI
-- 🤖 Powered by Claude 3.5 Sonnet (via Anthropic API)
+- 🤖 Powered by Google Gemini 2.5 Flash
 
 ## System Flow
 
 1. **Analysis Phase** (`POST /api/analyze`)
    - The user's prompt is sent to the backend.
-   - Claude analyzes the request to determine project type, required framework, and key features.
+   - Gemini analyzes the request to determine project type, required framework, and key features.
 
 2. **Planning Phase** (`POST /api/plan`)
-   - Based on the analysis, Claude creates a detailed file structure and implementation plan.
+   - Based on the analysis, Gemini creates a detailed file structure and implementation plan.
    - It identifies necessary files (HTML, CSS, JS, or React components).
 
 3. **Generation Phase** (Socket.IO)
    - The frontend initiates a real-time connection.
-   - The backend generates code for each file sequentially using Claude.
+   - The backend generates code for each file sequentially using Gemini.
    - Each file is validated and "cleaned" to remove markdown artifacts or system prompts.
    - Generated files are streamed back to the frontend immediately.
 
@@ -35,13 +35,13 @@ A full-stack AI-powered code generator that creates web projects from natural la
 ## Prerequisites
 
 - Node.js 22+ (Required for `--watch` flag)
-- Anthropic API Key
+- Google Gemini API Key (from [Google AI Studio](https://aistudio.google.com/apikey))
 
 ## Setup
 
 ### 1. Backend Setup
 
-The backend is built with Node.js and Express, utilizing `@anthropic-ai/sdk`.
+The backend is built with Node.js and Express, utilizing `@google/genai` (Gemini 2.5 Flash).
 
 ```bash
 cd backend
@@ -51,7 +51,7 @@ npm install
 
 # Setup Environment Variables
 cp .env.example .env
-# Open .env and add your ANTHROPIC_API_KEY
+# Open .env and add your GEMINI_API_KEY
 ```
 
 ### 2. Frontend Setup

@@ -17,6 +17,13 @@
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.0",
+    "@babel/preset-react": "^7.28.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "@google/genai": "^1.41.0",
+    "@langchain/core": "^1.1.26",
+    "@langchain/langgraph": "^1.1.5",
     "archiver": "^7.0.1",
     "compression": "^1.8.1",
     "cors": "^2.8.6",

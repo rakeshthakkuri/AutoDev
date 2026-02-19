@@ -137,19 +137,33 @@ export function bundleReactProject(files: Record<string, string>): BundledProjec
 
   const allComponents = Object.entries(transformedFiles)
     .map(([path, code]) => {
-      const processedCode = code
-        .replace(/import\s+.*?from\s+['"]react['"];?/g, '')
-        .replace(/import\s+.*?from\s+['"]react-dom['"];?/g, '')
-        .replace(/import\s+.*?from\s+['"][^'"]+['"];?/g, '// Import removed for bundling');
-
+      // Determine the component name BEFORE stripping exports
       if (path === entryPath) {
-        const defaultExportMatch = processedCode.match(/export\s+default\s+(\w+)/);
+        const defaultExportMatch = code.match(/export\s+default\s+(?:function\s+)?(\w+)/);
         if (defaultExportMatch) appComponentName = defaultExportMatch[1];
         else {
-          const funcMatch = processedCode.match(/(?:function|const|var|let)\s+(\w+)\s*[=(]/);
+          const funcMatch = code.match(/(?:function|const|var|let)\s+(\w+)\s*[=(]/);
           if (funcMatch) appComponentName = funcMatch[1];
         }
       }
+
+      let processedCode = code;
+
+      // Strip all import statements (including multi-line imports)
+      processedCode = processedCode
+        .replace(/import\s+[\s\S]*?\s+from\s+['"][^'"]+['"];?\s*/g, '// Import removed\n')
+        .replace(/import\s+['"][^'"]+['"];?\s*/g, '// Import removed\n');
+
+      // Strip export keywords but keep the declarations
+      processedCode = processedCode
+        .replace(/export\s+default\s+function\s+/g, 'function ')
+        .replace(/export\s+default\s+class\s+/g, 'class ')
+        .replace(/export\s+default\s+(\w+)\s*;?/g, '// default export: $1')
+        .replace(/export\s+(?:const|let|var|function|class)\s+/g, (match) =>
+          match.replace('export ', '')
+        )
+        .replace(/export\s*\{[^}]*\}\s*;?/g, '// Named exports removed');
+
       return `// ${path}\n${processedCode}`;
     })
     .join('\n\n');
@@ -485,6 +499,11 @@ export function bundleHTMLProject(files: Record<string, string>): BundledProject
 
   let html = files[htmlFile];
 
+  // Remove <script> and <link> tags that reference local files (they can't be
+  // resolved inside the iframe preview) — we'll inline them instead below.
+  html = html.replace(/<script\s+[^>]*src=["'](?!https?:\/\/)[^"']+["'][^>]*><\/script>\s*/gi, '');
+  html = html.replace(/<link\s+[^>]*href=["'](?!https?:\/\/)[^"']+\.css["'][^>]*\/?>\s*/gi, '');
+
   // Inject CSS
   const cssContent = cssFiles.map(([, c]) => c.replace(/@tailwind\s+\w+;\s*/g, '')).join('\n\n');
   if (cssContent) {
@@ -492,9 +511,22 @@ export function bundleHTMLProject(files: Record<string, string>): BundledProject
     else html = `<style>${cssContent}</style>\n${html}`;
   }
 
-  // Inject JS
-  const jsContent = jsFiles.map(([, c]) => c).join('\n\n');
-  if (jsContent) {
+  // Inject JS — strip import/export statements since we inline into a regular <script>
+  const jsContent = jsFiles.map(([, c]) => {
+    let processed = c;
+    processed = processed
+      .replace(/import\s+[\s\S]*?\s+from\s+['"][^'"]+['"];?\s*/g, '')
+      .replace(/import\s+['"][^'"]+['"];?\s*/g, '')
+      .replace(/export\s+default\s+function\s+/g, 'function ')
+      .replace(/export\s+default\s+class\s+/g, 'class ')
+      .replace(/export\s+default\s+(\w+)\s*;?/g, '')
+      .replace(/export\s+(?:const|let|var|function|class)\s+/g, (match) =>
+        match.replace('export ', '')
+      )
+      .replace(/export\s*\{[^}]*\}\s*;?/g, '');
+    return processed;
+  }).join('\n\n');
+  if (jsContent.trim()) {
     if (html.includes('</body>')) html = html.replace('</body>', `<script>${jsContent}</script></body>`);
     else html += `<script>${jsContent}</script>`;
   }

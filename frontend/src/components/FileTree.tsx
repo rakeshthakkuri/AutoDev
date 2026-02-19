@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { FolderOpen, Search, ChevronRight, AlertCircle, CheckCircle, FileCode, FileText, File } from 'lucide-react';
+import { FolderOpen, Search, ChevronRight, AlertCircle, CheckCircle, FileCode, FileText, File, Wrench } from 'lucide-react';
 import { GenerationStore } from '../store/generation';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -106,6 +106,7 @@ interface FolderNodeProps {
   editedFiles: Record<string, string>;
   searchQuery: string;
   streamingFile: string | null;
+  fixingFiles: Record<string, { attempt: number; totalAttempts: number; errors: string[] }>;
   plannedPaths: Set<string>;
   generatedPaths: Set<string>;
   expandedFolders: Set<string>;
@@ -115,7 +116,7 @@ interface FolderNodeProps {
 
 function FolderNode({
   node, depth, activeFile, onFileClick, validationResults, editedFiles,
-  searchQuery, streamingFile, plannedPaths, generatedPaths,
+  searchQuery, streamingFile, fixingFiles, plannedPaths, generatedPaths,
   expandedFolders, toggleFolder, focusedPath,
 }: FolderNodeProps) {
   const isExpanded = expandedFolders.has(node.path);
@@ -147,6 +148,7 @@ function FolderNode({
                 editedFiles={editedFiles}
                 searchQuery={searchQuery}
                 streamingFile={streamingFile}
+                fixingFiles={fixingFiles}
                 plannedPaths={plannedPaths}
                 generatedPaths={generatedPaths}
                 expandedFolders={expandedFolders}
@@ -164,6 +166,7 @@ function FolderNode({
   const validation = validationResults[node.path];
   const isActive = activeFile === node.path;
   const isStreaming = streamingFile === node.path;
+  const isFixing = node.path in fixingFiles;
   const isPlanned = plannedPaths.has(node.path) && !generatedPaths.has(node.path);
   const isEdited = node.path in editedFiles;
   const isFocused = focusedPath === node.path;
@@ -178,6 +181,7 @@ function FolderNode({
     'tree-file',
     isActive && 'active',
     isStreaming && 'streaming',
+    isFixing && 'fixing',
     isPlanned && 'planned',
     statusCls,
     isFocused && 'focused',
@@ -211,10 +215,15 @@ function FolderNode({
       </span>
       {isEdited && <span className="tree-file-modified" title="Modified">*</span>}
       {isStreaming && <span className="streaming-dot" />}
-      {validation && !validation.is_valid && validation.errors?.length > 0 && (
+      {isFixing && (
+        <span className="tree-file-status" title={`Fixing: attempt ${fixingFiles[node.path].attempt}/${fixingFiles[node.path].totalAttempts}`}>
+          <Wrench size={11} className="warning-icon" />
+        </span>
+      )}
+      {!isFixing && validation && !validation.is_valid && validation.errors?.length > 0 && (
         <span className="tree-file-status"><AlertCircle size={11} className="error-icon" /></span>
       )}
-      {validation?.is_valid && (
+      {!isFixing && validation?.is_valid && (
         <span className="tree-file-status"><CheckCircle size={11} className="valid-icon" /></span>
       )}
     </div>
@@ -244,7 +253,7 @@ export default function FileTree({ files, onFileClick, activeFile, validationRes
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const { streamingFile, generationPlan } = GenerationStore();
+  const { streamingFile, generationPlan, fixingFiles } = GenerationStore();
 
   const plannedPaths = useMemo(() => {
     const s = new Set<string>();
@@ -412,6 +421,7 @@ export default function FileTree({ files, onFileClick, activeFile, validationRes
             editedFiles={editedFiles}
             searchQuery={searchQuery}
             streamingFile={streamingFile}
+            fixingFiles={fixingFiles}
             plannedPaths={plannedPaths}
             generatedPaths={generatedPaths}
             expandedFolders={expandedFolders}

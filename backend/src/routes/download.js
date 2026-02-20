@@ -24,8 +24,15 @@ export function createDownloadRouter(generatedDir) {
         try {
             const { projectId } = req.params;
 
-            // Validate projectId format — must be project_ followed by hex chars
-            if (!/^project_[a-f0-9]{1,16}$/i.test(projectId)) {
+            // Basic validation: reject empty, extremely long, or traversal-like IDs
+            if (
+                !projectId ||
+                typeof projectId !== 'string' ||
+                projectId.length > 128 ||
+                projectId.includes('..') ||
+                projectId.includes('/') ||
+                projectId.includes('\\')
+            ) {
                 return res.status(400).json({ error: 'Invalid project ID format' });
             }
 

@@ -22,8 +22,7 @@ export default function BackendConnectionBanner() {
     <div className="backend-connection-banner" role="alert">
       <AlertCircle size={18} />
       <span>
-        <strong>Backend not running.</strong> Generation won&apos;t work until you start the backend.
-        Run in the project folder: <code>cd backend && npm run dev</code>
+        <strong>Unable to reach backend service.</strong> Please check the connection and try again.
       </span>
     </div>
   );

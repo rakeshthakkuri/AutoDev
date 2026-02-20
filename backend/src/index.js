@@ -23,7 +23,7 @@ import { createBundleRouter } from './routes/bundle.js';
 // Setup paths
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PROJECT_ROOT = path.join(__dirname, '..');
+const PROJECT_ROOT = path.join(__dirname, '..', '..');
 const GENERATED_DIR = path.join(PROJECT_ROOT, 'generated');
 
 if (!fs.existsSync(GENERATED_DIR)) fs.mkdirSync(GENERATED_DIR, { recursive: true });

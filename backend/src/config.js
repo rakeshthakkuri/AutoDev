@@ -7,6 +7,8 @@ dotenv.config();
 
 const env = process.env.NODE_ENV || 'development';
 
+const frontendUrl = process.env.FRONTEND_URL;
+
 const config = {
     // ── Environment
     env,
@@ -17,7 +19,9 @@ const config = {
     port: parseInt(process.env.PORT, 10) || 5001,
     corsOrigins: process.env.CORS_ORIGINS
         ? process.env.CORS_ORIGINS.split(',')
-        : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'],
+        : frontendUrl
+            ? [frontendUrl]
+            : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'],
 
     // ── LLM Provider
     llm: {

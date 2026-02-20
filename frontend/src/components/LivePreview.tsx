@@ -246,7 +246,7 @@ export default function LivePreview({ files }: LivePreviewProps) {
         <iframe
           ref={iframeRef}
           title="preview"
-          sandbox="allow-scripts"
+          sandbox="allow-scripts allow-forms"
           className={getIframeClassName()}
           style={getIframeStyle()}
         />

@@ -83,6 +83,40 @@ const PLACEHOLDER_DATA_URI =
     '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400"><rect fill="%235a67d8" width="600" height="400"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23fff" font-family="sans-serif" font-size="24">Preview</text></svg>'
   );
 
+// ─── CDN Package Registry ─────────────────────────────────────────────────────
+// Maps npm package names to a CDN URL + global variable, or an inline shim.
+// Used to resolve external package imports in the sandboxed preview environment.
+const CDN_PACKAGES = {
+  // Inline shims — no CDN latency, no network dependency
+  uuid: {
+    inline: `window.__pkg_uuid={v4:function(){return(typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0;return(c==='x'?r:r&0x3|0x8).toString(16);});},v1:function(){return Date.now().toString(16)+Math.random().toString(16).slice(2);},v3:function(){return'xxxxxxxx-xxxx-3xxx-xxxx-xxxxxxxxxxxx'.replace(/[x]/g,function(){return(Math.random()*16|0).toString(16);});},v5:function(){return'xxxxxxxx-xxxx-5xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0;return(c==='x'?r:r&0x3|0x8).toString(16);});}};`,
+    global: '__pkg_uuid',
+  },
+  clsx: {
+    inline: `window.__pkg_clsx=(function(){function c(){return Array.prototype.slice.call(arguments).map(function(a){if(!a)return'';if(typeof a==='string'||typeof a==='number')return String(a);if(Array.isArray(a))return c.apply(null,a);if(typeof a==='object')return Object.keys(a).filter(function(k){return!!a[k];}).join(' ');return'';}).filter(Boolean).join(' ');}return c;})();`,
+    global: '__pkg_clsx',
+  },
+  classnames: {
+    inline: `window.__pkg_classnames=(function(){function c(){return Array.prototype.slice.call(arguments).map(function(a){if(!a)return'';if(typeof a==='string'||typeof a==='number')return String(a);if(Array.isArray(a))return c.apply(null,a);if(typeof a==='object')return Object.keys(a).filter(function(k){return!!a[k];}).join(' ');return'';}).filter(Boolean).join(' ');}return c;})();`,
+    global: '__pkg_classnames',
+  },
+  // CDN-loaded packages
+  lodash:           { url: 'https://cdn.jsdelivr.net/npm/lodash@4/lodash.min.js', global: '_' },
+  'lodash-es':      { url: 'https://cdn.jsdelivr.net/npm/lodash@4/lodash.min.js', global: '_' },
+  axios:            { url: 'https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js', global: 'axios' },
+  moment:           { url: 'https://cdn.jsdelivr.net/npm/moment@2/moment.min.js', global: 'moment' },
+  dayjs:            { url: 'https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js', global: 'dayjs' },
+  'date-fns':       { url: 'https://cdn.jsdelivr.net/npm/date-fns@3/cdn.js', global: 'dateFns' },
+  'react-router-dom': { url: 'https://cdn.jsdelivr.net/npm/react-router-dom@6/dist/umd/react-router-dom.development.js', global: 'ReactRouterDOM' },
+  'react-router':   { url: 'https://cdn.jsdelivr.net/npm/react-router@6/dist/umd/react-router.development.js', global: 'ReactRouter' },
+  'chart.js':       { url: 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.js', global: 'Chart' },
+  recharts:         { deps: ['https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js'], url: 'https://cdn.jsdelivr.net/npm/recharts@2/umd/Recharts.js', global: 'Recharts' },
+  'framer-motion':  { url: 'https://cdn.jsdelivr.net/npm/framer-motion@11/dist/framer-motion.js', global: 'Motion' },
+  zod:              { url: 'https://cdn.jsdelivr.net/npm/zod@3/lib/index.umd.js', global: 'Zod' },
+  immer:            { url: 'https://cdn.jsdelivr.net/npm/immer@10/dist/immer.umd.production.min.js', global: 'immer' },
+  zustand:          { url: 'https://cdn.jsdelivr.net/npm/zustand@4/dist/umd/index.development.js', global: 'zustand' },
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function usesTailwind(files) {
@@ -110,36 +144,56 @@ function injectTailwind(html) {
 }
 
 function transformJSX(code, filename) {
-  // Hash the code so the cache key is a fixed-size string regardless of file size
-  const codeHash = createHash('sha256').update(code).digest('hex').substring(0, 16);
+  // Strip invisible characters that trigger spurious "Unexpected token" parse errors
+  const sanitized = sanitizeCode(code);
+
+  // Hash sanitized code so cache key is a fixed-size string regardless of file size
+  const codeHash = createHash('sha256').update(sanitized).digest('hex').substring(0, 16);
   const cacheKey = `${filename}:${codeHash}`;
   const cached = transformCache.get(cacheKey);
   if (cached) return { code: cached, errors: [] };
 
-  try {
-    const isTypescript = filename.endsWith('.tsx') || filename.endsWith('.ts');
-    const result = babel.transformSync(code, {
+  const isTypescript = filename.endsWith('.tsx') || filename.endsWith('.ts');
+
+  function runBabel(src, withTypescript) {
+    return babel.transformSync(src, {
       presets: [
-        // modules: false keeps import/export for our own stripping step
-        [presetEnv, { targets: { browsers: ['last 2 chrome versions'] }, modules: false }],
-        // classic runtime: React must be in scope. We provide it as a global in the preview.
+        // Use string target format — the legacy { browsers: [...] } key is deprecated
+        [presetEnv, { targets: 'last 2 Chrome versions', modules: false }],
+        // classic runtime: React must be in scope (provided as CDN global in preview)
         [presetReact, { runtime: 'classic' }],
-        isTypescript ? [presetTypescript, { isTSX: true, allExtensions: true }] : null
+        withTypescript ? [presetTypescript, { isTSX: true, allExtensions: true }] : null,
       ].filter(Boolean),
       filename,
       sourceType: 'module',
       compact: false,
       configFile: false,
-      babelrc: false
+      babelrc: false,
     });
+  }
 
+  try {
+    const result = runBabel(sanitized, isTypescript);
     if (result.code) {
       transformCache.set(cacheKey, result.code);
       return { code: result.code, errors: [] };
     }
     return { code: '', errors: ['Babel transformation returned no code'] };
-  } catch (error) {
-    return { code: '', errors: [error.message || 'Unknown transformation error'] };
+  } catch (firstError) {
+    // LLMs sometimes emit TypeScript syntax in .jsx files. Retry with the TS preset
+    // before giving up — this handles generic annotations, `as` casts, enums, etc.
+    if (!isTypescript) {
+      try {
+        const result = runBabel(sanitized, true /* withTypescript */);
+        if (result.code) {
+          transformCache.set(cacheKey, result.code);
+          return { code: result.code, errors: [] };
+        }
+      } catch (_) {
+        // Second attempt also failed — fall through to original error
+      }
+    }
+    return { code: '', errors: [firstError.message || 'Unknown transformation error'] };
   }
 }
 
@@ -182,6 +236,52 @@ function replacePlaceholderUrls(html) {
     /https?:\/\/(?:via\.placeholder|placehold\.co|placeholder\.com)(?:\.[a-z]+)?\/[^\s"']+/gi,
     PLACEHOLDER_DATA_URI
   );
+}
+
+// Remove BOM and invisible Unicode characters that cause Babel "Unexpected token" errors
+function sanitizeCode(code) {
+  return code
+    .replace(/^\uFEFF/, '')                         // BOM
+    .replace(/[\u200B-\u200D\uFEFF\u2028\u2029]/g, ''); // Zero-width + line/para separators
+}
+
+// Scan source files for external package imports (non-relative, non-core)
+function detectExternalPackages(files) {
+  const needed = new Set();
+  // Matches: import X from '…', import { … } from '…', import * as X from '…', import X, { … } from '…'
+  const re = /import\s+(?:[\w*{][^'"]*?\s+from\s+)?['"]([^'"./][^'"]*)['"]/g;
+  for (const content of Object.values(files)) {
+    if (typeof content !== 'string') continue;
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(content)) !== null) {
+      const root = m[1].split('/')[0]; // 'lodash/debounce' → 'lodash'
+      if (root !== 'react' && root !== 'react-dom') needed.add(root);
+    }
+  }
+  return needed;
+}
+
+// Build <script> tags (inline shims first, then CDN URLs) for needed packages
+function buildCdnScriptTags(neededPackages) {
+  const inlineSnippets = [];
+  const scriptTags = [];
+  for (const pkg of neededPackages) {
+    const info = CDN_PACKAGES[pkg];
+    if (!info) continue;
+    if (info.inline) {
+      inlineSnippets.push(info.inline);
+    } else {
+      if (info.deps) {
+        for (const dep of info.deps) scriptTags.push(`  <script src="${dep}" crossorigin></script>`);
+      }
+      scriptTags.push(`  <script src="${info.url}" crossorigin></script>`);
+    }
+  }
+  const inlineBlock = inlineSnippets.length
+    ? `  <script>\n    ${inlineSnippets.join('\n    ')}\n  </script>`
+    : '';
+  return [inlineBlock, ...scriptTags].filter(Boolean).join('\n');
 }
 
 // ─── Topological sort ─────────────────────────────────────────────────────────
@@ -251,6 +351,12 @@ export function bundleReactProject(files) {
   }
 
   const [entryPath] = entryFile;
+
+  // Detect external package imports across all source files so we can inject the
+  // right CDN scripts before any component code runs.
+  const neededPackages = detectExternalPackages(files);
+  const extraCdnScripts = buildCdnScriptTags(neededPackages);
+
   const transformedFiles = {};
   const cssFiles = [];
 
@@ -280,51 +386,217 @@ export function bundleReactProject(files) {
 
   let appComponentName = componentNameByPath[entryPath] ?? 'App';
 
+  // Returns true for anything React can legally use as a JSX element type:
+  // plain functions, classes, React.memo results, React.forwardRef results.
+  const VALID_REACT_TYPE_CHECK =
+    `(typeof __v === 'function' || (__v && typeof __v === 'object' && __v.$$typeof))`;
+
+  // Emit a runtime expression that looks up the component registry and falls back
+  // to a visible placeholder — never returns a bare object.
+  const safeComponentRef = (alias) =>
+    `(function(){ var __v = window.__Component_${alias}; return ${VALID_REACT_TYPE_CHECK} ? __v : function ${alias}(){ return React.createElement('span', { style: { color: '#888', fontSize: '0.75rem', fontFamily: 'monospace' } }, '[${alias}]'); }; })()`;
+
   const processFileCode = (path, code) => {
     let processedCode = code;
+
+    // ── Pre-scan: capture all named exports BEFORE stripping them ─────────────
+    // We register every exported symbol in the component registry so that
+    // `import { Button, Input } from './components/ui'` works even when the
+    // file uses only named exports (no default export).
+    const namedExportRe = /\bexport\s+(?:const\s+|let\s+|var\s+|function\*?\s+|class\s+)(\w+)/g;
+    const allNamedExports = new Set();
+    for (const m of processedCode.matchAll(namedExportRe)) {
+      if (m[1]) allNamedExports.add(m[1]);
+    }
+
+    // ── Step 0: Asset imports → empty object stubs ───────────────────────────
+    // CSS modules, SVG, image, font imports are not resolvable in preview;
+    // give them an empty object so code like `styles.container` doesn't crash.
+    processedCode = processedCode.replace(
+      /import\s+(\w+)\s+from\s+['"][^'"]+\.(?:css|scss|less|sass|svg|png|jpg|jpeg|gif|webp|avif|woff2?|ttf|eot|ico)(?:\?[^'"]*)?['"]\s*;?/g,
+      (_, ident) => `const ${ident} = {}; // asset import (not available in preview)\n`
+    );
+
+    // ── Step 1: Default imports ────────────────────────────────────────────────
+    // Handles: import Foo from 'module'
     processedCode = processedCode.replace(
       /import\s+(\w+)\s+from\s+['"]([^'"]+)['"]\s*;?/g,
       (_, ident, importPath) => {
         const rawPath = (importPath || '').replace(/^['"]|['"]\s*;?\s*$/g, '').trim();
-        // Match react, react-dom, react-dom/client, react-dom/server, etc.
+        // React/ReactDOM — available as CDN globals
         if (rawPath === 'react' || rawPath === 'react-dom' || rawPath.startsWith('react-dom/')) {
           return '/* ' + ident + ' from CDN */';
         }
+        // Local component file (default import) — guard with typeof check so
+        // an object default export never silently becomes a React element type
         const resolved = resolveComponentPath(importPath, path, fileKeys);
-        const targetName = resolved ? (componentNameByPath[resolved] ?? ident) : ident;
-        // Never let a component resolve to null — null crashes React.createElement.
-        // Use a placeholder function so unknown imports render a visible stub instead.
-        return `const ${ident} = (typeof window !== 'undefined' && window.__Component_${targetName}) || function ${ident}() { return React.createElement('span', { style: { color: '#888', fontSize: '0.75rem', fontFamily: 'monospace' } }, '[${ident}]'); };`;
+        if (resolved) {
+          const targetName = componentNameByPath[resolved] ?? ident;
+          return `const ${ident} = ${safeComponentRef(targetName)};`;
+        }
+        // Local path that didn't resolve (file missing from bundle) — must return a
+        // function, never an object, or React will throw "Element type is invalid: got object"
+        if (rawPath.startsWith('.') || rawPath.startsWith('/')) {
+          return `const ${ident} = ${safeComponentRef(ident)};`;
+        }
+        // External npm package (default import)
+        const rootPkg = rawPath.split('/')[0];
+        const cdnInfo = CDN_PACKAGES[rootPkg];
+        if (cdnInfo) {
+          // CDN global when loaded (may be object or function — valid either way).
+          // Stub is a no-op function so <Pkg /> doesn't crash if CDN fails.
+          return `const ${ident} = (typeof ${cdnInfo.global} !== 'undefined') ? ${cdnInfo.global} : function ${ident}(){ console.warn('[preview] CDN failed for "${rawPath}"'); return null; };`;
+        }
+        // Unknown external package — function stub so it can be used as JSX without crashing
+        return `function ${ident}(){ console.warn('[preview] "${rawPath}" is not available in preview'); return null; } /* ${rawPath} */`;
       }
     );
 
+    // ── Step 1b: Named imports from LOCAL files ───────────────────────────────
+    // Handles: import { Button, Input } from './components/ui'
+    // Each named export is independently registered in the component registry,
+    // so we can look each one up by name.
+    processedCode = processedCode.replace(
+      /import\s+\{([^}]+)\}\s+from\s+['"](\.[^'"]*)['"]\s*;?/g,
+      (_, namedImports) => {
+        const imports = namedImports
+          .split(',')
+          .map(s => {
+            const parts = s.trim().split(/\s+as\s+/);
+            return { original: parts[0].trim(), alias: (parts[1] || parts[0]).trim() };
+          })
+          .filter(i => i.original && i.alias);
+        return imports
+          .map(({ original, alias }) => `const ${alias} = ${safeComponentRef(original)};`)
+          .join('\n');
+      }
+    );
+
+    // ── Step 2: Named imports from external packages ───────────────────────────
+    // Handles: import { v4 as uuidv4, v1 } from 'uuid'
+    // Only matches paths that don't start with . or / (i.e. npm packages)
+    processedCode = processedCode.replace(
+      /import\s+\{([^}]+)\}\s+from\s+['"]([^'"./][^'"]*)['"]\s*;?/g,
+      (_, namedImports, pkg) => {
+        const rootPkg = pkg.split('/')[0];
+        // React/ReactDOM named imports are already destructured at the top of the script
+        if (rootPkg === 'react' || rootPkg === 'react-dom') {
+          return '// React/ReactDOM named imports available as globals\n';
+        }
+        const imports = namedImports
+          .split(',')
+          .map(s => {
+            const parts = s.trim().split(/\s+as\s+/);
+            return { original: parts[0].trim(), alias: (parts[1] || parts[0]).trim() };
+          })
+          .filter(i => i.original && i.alias);
+
+        const cdnInfo = CDN_PACKAGES[rootPkg];
+        if (cdnInfo) {
+          return imports
+            .map(({ original, alias }) =>
+              `const ${alias} = (typeof ${cdnInfo.global} !== 'undefined' && ${cdnInfo.global} != null && ${cdnInfo.global}['${original}'] !== undefined) ? ${cdnInfo.global}['${original}'] : function ${alias}() { console.warn('[preview] ${pkg}.${original} not available'); return undefined; };`
+            )
+            .join('\n');
+        }
+        // Unknown package — warning stubs so the file runs without crashing
+        return imports
+          .map(({ alias }) =>
+            `function ${alias}() { console.warn('[preview] Package "${pkg}" (${alias}) is not available in preview mode'); return undefined; }`
+          )
+          .join('\n');
+      }
+    );
+
+    // ── Step 3: Namespace imports from external packages ──────────────────────
+    // Handles: import * as uuid from 'uuid'  /  import * as Icons from 'lucide-react'
+    processedCode = processedCode.replace(
+      /import\s+\*\s+as\s+(\w+)\s+from\s+['"]([^'"./][^'"]*)['"]\s*;?/g,
+      (_, alias, pkg) => {
+        const rootPkg = pkg.split('/')[0];
+        const cdnInfo = CDN_PACKAGES[rootPkg];
+        if (cdnInfo) {
+          return `const ${alias} = (typeof ${cdnInfo.global} !== 'undefined') ? ${cdnInfo.global} : {};`;
+        }
+        return `const ${alias} = {}; /* Package "${pkg}" not available in preview */`;
+      }
+    );
+
+    // ── Step 4: Combined default + named imports from external packages ────────
+    // Handles: import React, { useState } from 'react'  /  import axios, { isAxiosError } from 'axios'
+    processedCode = processedCode.replace(
+      /import\s+(\w+)\s*,\s*\{([^}]+)\}\s+from\s+['"]([^'"./][^'"]*)['"]\s*;?/g,
+      (_, defaultIdent, namedImports, pkg) => {
+        const rootPkg = pkg.split('/')[0];
+        if (rootPkg === 'react' || rootPkg === 'react-dom') {
+          return '// React/ReactDOM combined import — available as globals\n';
+        }
+        const imports = namedImports
+          .split(',')
+          .map(s => {
+            const parts = s.trim().split(/\s+as\s+/);
+            return { original: parts[0].trim(), alias: (parts[1] || parts[0]).trim() };
+          })
+          .filter(i => i.original && i.alias);
+
+        const cdnInfo = CDN_PACKAGES[rootPkg];
+        const defaultLine = cdnInfo
+          ? `const ${defaultIdent} = (typeof ${cdnInfo.global} !== 'undefined') ? ${cdnInfo.global} : function ${defaultIdent}(){ return null; };`
+          : `function ${defaultIdent}(){ console.warn('[preview] "${pkg}" not available'); return null; }`;
+        const namedLines = imports
+          .map(({ original, alias }) =>
+            cdnInfo
+              ? `const ${alias} = (typeof ${cdnInfo.global} !== 'undefined' && ${cdnInfo.global}['${original}'] !== undefined) ? ${cdnInfo.global}['${original}'] : function ${alias}() { return undefined; };`
+              : `function ${alias}() { console.warn('[preview] Package "${pkg}" (${alias}) not available'); return undefined; }`
+          )
+          .join('\n');
+        return [defaultLine, namedLines].filter(Boolean).join('\n');
+      }
+    );
+
+    // ── Step 5: Remove any remaining import statements ────────────────────────
     processedCode = processedCode
       .replace(/import\s+[\s\S]*?\s+from\s+['"][^'"]+['"];?\s*/g, '// Import removed\n')
       .replace(/import\s+['"][^'"]+['"];?\s*/g, '// Import removed\n')
       // Babel sometimes emits `var _react = _interopRequireDefault(require("react"))` — strip it
       .replace(/var\s+_react\s*=\s*[^;]+;/g, '// _react = React (from CDN)\n')
       .replace(/var\s+_reactDom\s*=\s*[^;]+;/g, '// _reactDom = ReactDOM (from CDN)\n')
-      // Replace _react.default.createElement / _react2.default with React
       .replace(/_react\d*\.default\b/g, 'React')
       .replace(/_reactDom\d*\.default\b/g, 'ReactDOM')
-      // Babel interop helpers that declare React clash with our global
       .replace(/function\s+_interopRequireDefault[^{]*\{[^}]*\}/g, '')
       .replace(/function\s+_interopRequireWildcard[^}]+\}[\s\S]*?\}/g, '');
 
+    // ── Step 6: Strip exports ─────────────────────────────────────────────────
     processedCode = processedCode
       .replace(/export\s+default\s+function\s+/g, 'function ')
       .replace(/export\s+default\s+class\s+/g, 'class ')
+      // `export default { A, B }` — exporting a plain object as the module default
+      // is one of the most common LLM mistakes. Strip the statement entirely;
+      // the symbols A and B are already declared in scope and will be registered below.
+      .replace(/export\s+default\s+\{[^}]*\}\s*;?/g, '// export default object removed\n')
       .replace(/export\s+default\s+(\w+)\s*;?/g, '// default export: $1')
-      .replace(/export\s+(?:const|let|var|function|class)\s+/g, (match) =>
-        match.replace('export ', '')
-      )
-      .replace(/export\s*\{[^}]*\}\s*;?/g, '// Named exports removed');
+      .replace(/export\s+(?:const|let|var|function\*?|class)\s+/g, (m) => m.replace('export ', ''))
+      // Barrel re-exports: export * from / export * as X from
+      .replace(/export\s+\*\s+(?:as\s+\w+\s+)?from\s+['"][^'"]+['"];?\s*/g, '// re-export removed\n')
+      .replace(/export\s*\{[^}]*\}\s*(?:from\s+['"][^'"]+['"])?\s*;?/g, '// named export removed\n');
 
+    // ── Step 7: Register components ───────────────────────────────────────────
+    // Register the file's main component AND every named export so that both
+    // `import Foo from './Foo'` and `import { Foo } from './Foo'` resolve correctly.
     const componentName = componentNameByPath[path];
-    const registerLine = `if (typeof ${componentName} !== 'undefined') { window.__Component_${componentName} = ${componentName}; }`;
-    // Wrap in IIFE: each file gets its own scope so const/let/function declarations
-    // from different files never collide in the shared <script> block.
-    return `// ${path}\n(function() {\n${processedCode}\n${registerLine}\n})();`;
+    const allSymbols = new Set([componentName, ...allNamedExports]);
+    const registerLines = [...allSymbols]
+      .filter(Boolean)
+      .map(name =>
+        // Only register functions and React special types (memo, forwardRef, lazy).
+        // Registering plain objects would poison the registry and cause "got: object" crashes.
+        `(function(){ var __v = ${name}; if (__v != null && (typeof __v === 'function' || (typeof __v === 'object' && __v.$$typeof))) { window.__Component_${name} = __v; } })()`
+      )
+      .join('\n  ');
+
+    // Wrap in IIFE: each file gets its own scope so declarations from different
+    // files never collide in the shared <script> block.
+    return `// ${path}\n(function() {\n${processedCode}\n  ${registerLines}\n})();`;
   };
 
   // Topological sort: dependencies execute before the files that import them.
@@ -355,6 +627,7 @@ export function bundleReactProject(files) {
   <div id="root"></div>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+${extraCdnScripts}
   <script>
     var module = { exports: {} };
     var exports = module.exports;
@@ -363,9 +636,10 @@ export function bundleReactProject(files) {
     // ReactDOM APIs — covers both 'react-dom' and 'react-dom/client' named imports
     const { createRoot, hydrateRoot, flushSync } = ReactDOM;
 
-    function SafeComponent(Comp, fallback) {
-      if (Comp == null) return React.createElement('div', { style: { padding: '1rem', color: '#888', fontFamily: 'monospace' } }, fallback || 'Component not found');
-      return React.createElement(Comp);
+    function SafeComponent(Comp, props, fallback) {
+      var valid = Comp != null && (typeof Comp === 'function' || (typeof Comp === 'object' && Comp.$$typeof));
+      if (!valid) return React.createElement('div', { style: { padding: '1rem', color: '#888', fontFamily: 'monospace' } }, fallback || '[Component not found]');
+      return React.createElement(Comp, props || null);
     }
 
     class ErrorBoundary extends React.Component {
@@ -411,10 +685,19 @@ export function bundleReactProject(files) {
       if (!__previewMounted) {
         // The generated code is a component-only file (no ReactDOM.createRoot call).
         // Mount it ourselves using the global component registry.
-        var _rootComp = window.__Component_${appComponentName} ?? null;
+        // Guard: typeof check prevents "Element type is invalid...got: object" when the
+        // LLM accidentally exports a plain object instead of a component function.
+        var _rootRaw = window.__Component_${appComponentName};
+        var _rootComp = (_rootRaw != null && (typeof _rootRaw === 'function' || (typeof _rootRaw === 'object' && _rootRaw.$$typeof))) ? _rootRaw : null;
         var _root = ReactDOM.createRoot(document.getElementById('root'));
         if (_rootComp) {
           _root.render(React.createElement(ErrorBoundary, null, React.createElement(_rootComp, null)));
+        } else if (_rootRaw != null) {
+          // Something was exported but it's not a function — show a useful message
+          _root.render(React.createElement('div', { style: { padding: '2rem', color: '#ff6b6b', fontFamily: 'monospace', background: '#1a1a1a', minHeight: '100vh' } },
+            React.createElement('h1', { style: { marginBottom: '1rem' } }, 'Invalid Component'),
+            React.createElement('pre', null, '"${appComponentName}" is not a function (got: ' + typeof _rootRaw + '). Use: export default function ${appComponentName}() { ... }')
+          ));
         } else {
           _root.render(React.createElement('div', { style: { padding: '2rem', textAlign: 'center', color: '#666' } }, 'Component not found'));
         }

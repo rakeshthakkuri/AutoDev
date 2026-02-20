@@ -22,8 +22,8 @@ A full-stack AI-powered code generator that creates web projects from natural la
    - Based on the analysis, Gemini creates a detailed file structure and implementation plan.
    - It identifies necessary files (HTML, CSS, JS, or React components).
 
-3. **Generation Phase** (Socket.IO)
-   - The frontend initiates a real-time connection.
+3. **Generation Phase**
+   - The frontend triggers generation via the REST API.
    - The backend generates code for each file sequentially using Gemini.
    - Each file is validated and "cleaned" to remove markdown artifacts or system prompts.
    - Generated files are streamed back to the frontend immediately.
@@ -98,12 +98,12 @@ ai-project-generator/
 ├── backend/
 │   ├── src/
 │   │   ├── services/
-│   │   │   ├── llm.js        # Anthropic integration & prompt engineering
+│   │   │   ├── llm.js        # Gemini integration & prompt handling
 │   │   │   ├── templates.js  # React project templates
 │   │   │   ├── validator.js  # Code validation & auto-fixing
 │   │   │   ├── analysis.js   # Requirement analysis
-│   │   │   └── projectGeneration.js # Orchestration
-│   │   └── index.js          # Express server & socket.io logic
+│   │   │   └── projectGeneration.js # Generation orchestration
+│   │   └── index.js          # Express server, routing and middleware
 │   └── package.json
 ├── frontend/
 │   ├── src/
@@ -115,5 +115,5 @@ ai-project-generator/
 ## Technologies
 
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS, Lucide React
-- **Backend:** Node.js, Express, Socket.IO
-- **AI:** Anthropic Claude 3.5 Sonnet
+- **Backend:** Node.js, Express
+- **AI:** Google Gemini 2.5 Flash

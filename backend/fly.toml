@@ -1,12 +1,13 @@
-# fly.toml app configuration file generated for ai-code-generator-backend-autumn-mountain-7604 on 2026-02-20T16:06:30+05:30
+# fly.toml app configuration file generated for ai-code-generator on 2026-04-13T01:56:48+05:30
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'ai-code-generator-backend-autumn-mountain-7604'
+app = 'ai-code-generator'
 primary_region = 'bom'
 
 [build]
+  dockerfile = 'Dockerfile'
 
 [env]
   NODE_ENV = 'production'

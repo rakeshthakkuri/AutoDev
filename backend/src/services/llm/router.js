@@ -45,13 +45,21 @@ class LLMRouter {
         );
 
         if (this.providers.length === 0) {
-            throw new Error('No LLM providers available. Set GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.');
+            // `npm run build` / Docker image build runs check-build.mjs with BUILD_CHECK=1; secrets are not available then.
+            if (process.env.BUILD_CHECK === '1') {
+                logger.warn('BUILD_CHECK: no LLM API keys loaded (expected during image build)');
+            } else {
+                throw new Error('No LLM providers available. Set GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.');
+            }
+        } else {
+            logger.info('LLM providers available', { providers: this.providers.map(p => p.name) });
         }
-
-        logger.info('LLM providers available', { providers: this.providers.map(p => p.name) });
     }
 
     async _withFallback(method, ...args) {
+        if (this.providers.length === 0) {
+            throw new Error('No LLM providers available. Set GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.');
+        }
         let lastErr = null;
         for (const provider of this.providers) {
             const circuit = this.circuits[provider.name];

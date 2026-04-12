@@ -144,6 +144,7 @@ Paths relative to `backend/`.
 - **`.dockerignore`** — Excludes files from Docker build context (reduces image size).
 - **`Dockerfile`** — Node 22 Alpine: `npm ci --omit=dev`, copy source, `npm run build`, exposes 5001, `CMD npm start`.
 - **`fly.toml`** — Fly.io app config: internal port 5001, HTTP health check `GET /health`, auto stop/start machines.
+- **`DEPLOY.md`** — Deploying on Fly: secrets, scaling, health checks. PostgreSQL is expected from **Supabase** (or any reachable URL via `DATABASE_URL`); Fly Postgres is not required.
 - **`BACKEND_REFACTOR.md`** — Project narrative / refactor notes (markdown; not executable).
 
 ### Scripts and logs

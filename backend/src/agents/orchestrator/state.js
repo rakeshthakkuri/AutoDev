@@ -37,6 +37,9 @@ export const PHASES = {
  */
 export function initializeErrorBudget(plan) {
     const totalFiles = (plan?.files || []).length;
+    // Larger projects need more review→fix cycles; cap to control cost
+    const fixRoundsAllowed = Math.min(6, 2 + Math.floor(totalFiles / 15));
+
     return {
         // Allow 20% of files to fail (minimum 1)
         filesAllowed: Math.max(1, Math.floor(totalFiles * 0.2)),
@@ -47,7 +50,7 @@ export function initializeErrorBudget(plan) {
         planRevisionsUsed: 0,
 
         // Fix rounds (full project review → fix cycles)
-        fixRoundsAllowed: 2,
+        fixRoundsAllowed,
         fixRoundsUsed: 0,
 
         // Global token budget (prevent runaway costs)

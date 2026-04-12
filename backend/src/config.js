@@ -95,7 +95,7 @@ const config = {
     // ── Agent (orchestrator)
     agent: {
         maxSteps: parseInt(process.env.AGENT_MAX_STEPS, 10) || 500,
-        maxFixAttempts: parseInt(process.env.AGENT_MAX_FIX_ATTEMPTS, 10) || 2,
+        maxFixAttempts: parseInt(process.env.AGENT_MAX_FIX_ATTEMPTS, 10) || 3,
         maxFixAttemptsTruncation: parseInt(process.env.AGENT_MAX_FIX_ATTEMPTS_TRUNCATION, 10) || 3,
     },
 

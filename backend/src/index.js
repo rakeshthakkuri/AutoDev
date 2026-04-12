@@ -65,6 +65,20 @@ projectGenerationService._analysisService = analysisService;
 const app = express();
 const server = http.createServer(app);
 
+// Behind Fly.io / other reverse proxies so rate limits and req.ip use the real client.
+if (process.env.TRUST_PROXY) {
+    const raw = process.env.TRUST_PROXY.trim();
+    if (raw === 'true' || raw === '1') {
+        app.set('trust proxy', 1);
+    } else if (/^\d+$/.test(raw)) {
+        app.set('trust proxy', parseInt(raw, 10));
+    } else {
+        app.set('trust proxy', raw);
+    }
+} else if (config.isProd) {
+    app.set('trust proxy', 1);
+}
+
 app.use(requestIdMiddleware);
 
 app.use(helmet({

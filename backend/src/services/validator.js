@@ -5,6 +5,8 @@ import { execSync } from 'child_process';
 import crypto from 'crypto';
 import config from '../config.js';
 import { validateImportResolution, auditPackageDependencies } from './importResolver.js';
+import { parseLikeBundler } from './babelParseLikeBundler.js';
+import { fixKnownImportCollisions } from './importCollisionFixer.js';
 
 export class CodeValidator {
     constructor() {
@@ -714,22 +716,44 @@ export class CodeValidator {
 
     // ─── Auto-Fix Common Errors ─────────────────────────────────────────
 
-    autoFixCommonErrors(code, fileType) {
+    autoFixCommonErrors(code, fileType, options = {}) {
         const fixes = [];
         let fixed = code;
+        const { skipBracePadding = false, maxBraceDelta = 5 } = options;
 
         if (fileType === 'html') {
             if (!/<!DOCTYPE/i.test(fixed)) { fixed = `<!DOCTYPE html>\n${fixed}`; fixes.push('Added DOCTYPE'); }
             if (!/<html/i.test(fixed)) { fixed = `<html lang="en">\n${fixed}\n</html>`; fixes.push('Wrapped in html tags'); }
         }
 
-        if (['css', 'scss', 'js', 'jsx', 'ts', 'tsx'].includes(fileType)) {
+        if (!skipBracePadding && ['css', 'scss', 'js', 'jsx', 'ts', 'tsx'].includes(fileType)) {
             const o = (fixed.match(/{/g) || []).length;
             const c = (fixed.match(/}/g) || []).length;
-            if (o > c) { fixed += '\n' + '}'.repeat(o - c); fixes.push(`Added ${o - c} closing brace(s)`); }
+            const delta = o - c;
+            if (delta > 0 && delta <= maxBraceDelta) {
+                fixed += '\n' + '}'.repeat(delta);
+                fixes.push(`Added ${delta} closing brace(s)`);
+            } else if (delta > maxBraceDelta) {
+                // Large mismatch — likely broken AST; padding braces usually makes it worse
+            }
         }
 
         return { fixedCode: fixed, fixesApplied: fixes };
+    }
+
+    /**
+     * Whether to run Babel parse (preview parity). Skips CommonJS-only tooling files.
+     */
+    _shouldBabelParse(filePath, cleanCode) {
+        const ext = path.extname(filePath).toLowerCase();
+        const fname = path.basename(filePath).toLowerCase();
+        if (['.jsx', '.tsx', '.ts'].includes(ext)) return true;
+        if (ext === '.js') {
+            if (fname.endsWith('.config.js') || /^(webpack|rollup|vite|jest|babel)\.config\b/i.test(fname)) return false;
+            const looksEsm = /\b(import\s+|export\s+)/.test(cleanCode) || /<\s*[A-Za-z]/.test(cleanCode);
+            return looksEsm;
+        }
+        return false;
     }
 
     // ─── Main Entry: Validate File ──────────────────────────────────────
@@ -737,9 +761,13 @@ export class CodeValidator {
     validateFile(code, filePath, framework = config.defaultFramework) {
         this.validationMetrics.totalValidations++;
 
-        const cleanCode = this._cleanArtifacts(code);
+        let cleanCode = this._cleanArtifacts(code);
         const ext = path.extname(filePath).toLowerCase();
         const fname = path.basename(filePath).toLowerCase();
+
+        if (ext === '.jsx' || ext === '.tsx') {
+            cleanCode = fixKnownImportCollisions(cleanCode);
+        }
 
         let result = { isValid: false, errors: [], warnings: [], fixedCode: null, fixesApplied: [], filePath };
 
@@ -788,9 +816,22 @@ export class CodeValidator {
                 result.isValid = true;
             }
 
+            // Preview parity: same Babel parse bar as Live Preview bundler
+            if (this._shouldBabelParse(filePath, cleanCode)) {
+                const parsed = parseLikeBundler(cleanCode, filePath);
+                if (!parsed.ok && parsed.error) {
+                    result.errors.push(`Parse error (preview parity): ${parsed.error}`);
+                    result.isValid = false;
+                }
+            }
+
+            const hadParseError = result.errors.some((e) => typeof e === 'string' && e.startsWith('Parse error (preview parity):'));
             // Auto-fix if failed
             if (!result.isValid && !result.fixedCode) {
-                const autoFix = this.autoFixCommonErrors(cleanCode, ext.replace('.', ''));
+                const autoFix = this.autoFixCommonErrors(cleanCode, ext.replace('.', ''), {
+                    skipBracePadding: hadParseError,
+                    maxBraceDelta: 5,
+                });
                 if (autoFix.fixesApplied.length > 0) {
                     result.fixedCode = autoFix.fixedCode;
                     result.fixesApplied = autoFix.fixesApplied;

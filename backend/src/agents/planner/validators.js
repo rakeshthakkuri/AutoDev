@@ -7,9 +7,9 @@ import {
 } from './dependencyGraph.js';
 
 const FILE_COUNT_BOUNDS = {
-    simple: [3, 7],
-    intermediate: [5, 14],
-    advanced: [8, 18],
+    simple: [3, 12],
+    intermediate: [5, 22],
+    advanced: [8, 40],
 };
 
 const FRAMEWORK_ENTRY_POINTS = {
@@ -48,9 +48,9 @@ export function validatePlan(plan, requirements) {
         });
     }
     if (files.length > max) {
-        warnings.push({
+        errors.push({
             type: 'FILE_COUNT_MISMATCH',
-            message: `${files.length} files exceeds typical ${max} for ${complexity} complexity — may slow generation`,
+            message: `Plan has ${files.length} files; maximum for "${complexity}" complexity is ${max}. Reduce scope or use a higher complexity setting.`,
         });
     }
 

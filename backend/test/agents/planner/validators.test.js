@@ -43,11 +43,11 @@ describe('validatePlan', () => {
         assert.ok(result.errors.some(e => e.type === 'FILE_COUNT_MISMATCH'));
     });
 
-    it('warns when file count exceeds maximum', () => {
+    it('fails when file count exceeds maximum for complexity', () => {
         const files = Array.from({ length: 25 }, (_, i) => ({ path: `src/file${i}.jsx`, purpose: '' }));
         files.push({ path: 'src/App.jsx', purpose: 'App' });
         const result = validatePlan({ files }, { framework: 'react', complexity: 'simple' });
-        assert.ok(result.warnings.some(w => w.type === 'FILE_COUNT_MISMATCH'));
+        assert.ok(result.errors.some(e => e.type === 'FILE_COUNT_MISMATCH'));
     });
 
     it('fails on duplicate paths', () => {

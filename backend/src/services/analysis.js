@@ -2,6 +2,7 @@ import config from '../config.js';
 import { generateCompletion, ANALYZER_PROMPT, PLANNER_PROMPT, FRAMEWORKS, STYLING_OPTIONS } from './llm.js';
 import { getCachedAnalysis, setCachedAnalysis, getCachedPlan, setCachedPlan } from './cache.js';
 import logger from './logger.js';
+import { FILE_COUNT_BOUNDS } from '../agents/planner/validators.js';
 
 // ─── Framework-Specific File Structures ──────────────────────────────────────
 const FRAMEWORK_FILE_STRUCTURES = {
@@ -476,8 +477,15 @@ export class AnalysisService {
     async generatePlan(requirements) {
         const cached = getCachedPlan(requirements);
         if (cached) {
-            logger.info('Plan cache hit');
-            return cached;
+            const complexity = requirements.complexity || 'simple';
+            const [, maxFiles] = FILE_COUNT_BOUNDS[complexity] || FILE_COUNT_BOUNDS.intermediate;
+            const n = cached.files?.length ?? 0;
+            if (n > maxFiles) {
+                logger.warn('Plan cache skipped — cached plan exceeds complexity file cap', { complexity, n, maxFiles });
+            } else {
+                logger.info('Plan cache hit');
+                return cached;
+            }
         }
 
         const framework = requirements.framework || config.defaultFramework;

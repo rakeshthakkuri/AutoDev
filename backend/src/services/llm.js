@@ -1,8 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
 import config from '../config.js';
-import logger from './logger.js';
-
-let ai = null;
 
 // ─── Supported Frameworks (re-export from config as single source of truth) ───
 export const FRAMEWORKS = config.frameworks;
@@ -13,6 +9,18 @@ export const PROJECT_TYPES = [
     'landing-page', 'web-app', 'dashboard', 'portfolio', 'ecommerce',
     'blog', 'documentation', 'saas', 'social', 'admin-panel', 'crm', 'game'
 ];
+
+const LANDING_QUALITY_RUBRIC = `
+LANDING PAGE QUALITY BENCHMARK (apply when projectType is "landing-page"):
+- Build a conversion-focused narrative, not a generic section stack.
+- Include semantic sections with clear role and hierarchy: hero, social proof, value/features, process/how-it-works, testimonials/trust, CTA, and footer.
+- Typography must follow a clear scale (display/h1/h2/body/small) with strong hierarchy.
+- Spacing must follow a repeatable token rhythm; avoid random one-off spacing values.
+- Use an accessible color system with strong text/background contrast.
+- Include polished hover/focus states and subtle motion that respects reduced-motion preferences.
+- Ensure mobile-first responsiveness with clean breakpoints and readable line lengths.
+- Do not use lorem ipsum or generic placeholder labels.
+`;
 
 // ─── Analyzer Prompt ─────────────────────────────────────────────────────────
 export const ANALYZER_PROMPT = `Analyze the user's web project request and provide a detailed technical specification.
@@ -34,8 +42,22 @@ REQUIRED JSON STRUCTURE (use exactly these keys):
   "stylingFramework": "tailwind" | "plain-css" | "css-modules" | "styled-components" | "scss",
   "colorScheme": "Description of colors",
   "layout": "Description of layout",
-  "description": "Short summary"
-}`;
+  "description": "Short summary",
+  "designIntent": {
+    "styleDirection": "e.g., premium-modern, editorial, minimal-tech",
+    "targetAudience": "e.g., startup founders, developers, consumers",
+    "conversionGoal": "e.g., signup, demo booking, purchase, contact",
+    "visualDensity": "airy" | "balanced" | "dense",
+    "qualityBar": "standard" | "premium"
+  }
+}
+
+QUALITY DEFAULTS FOR SHORT OR VAGUE PROMPTS:
+- If the prompt is brief (e.g., "give a landing page"), infer premium-modern quality.
+- For landing-page, default designIntent.qualityBar to "premium" unless user asks for basic.
+- Prefer persuasive, real-world section copy over placeholders.
+
+${LANDING_QUALITY_RUBRIC}`;
 
 // ─── Planner Prompt ──────────────────────────────────────────────────────────
 export const PLANNER_PROMPT = `Plan the complete file structure for this web project.
@@ -61,7 +83,36 @@ REQUIRED JSON STRUCTURE:
   "techStack": ["List of technologies"],
   "designSystem": {
     "primaryColor": "hex code",
-    "fontFamily": "font name"
+    "colorPalette": {
+      "background": "hex",
+      "surface": "hex",
+      "text": "hex",
+      "mutedText": "hex",
+      "accent": "hex"
+    },
+    "fontFamily": "font name",
+    "typeScale": {
+      "display": "size",
+      "h1": "size",
+      "h2": "size",
+      "body": "size",
+      "small": "size"
+    },
+    "spacingScale": ["4px", "8px", "12px", "16px", "24px", "32px", "48px"],
+    "radiusScale": {
+      "sm": "value",
+      "md": "value",
+      "lg": "value"
+    },
+    "shadowScale": {
+      "soft": "shadow",
+      "medium": "shadow"
+    },
+    "motion": {
+      "durationFast": "ms",
+      "durationNormal": "ms",
+      "easing": "css easing"
+    }
   }
 }
 
@@ -78,6 +129,8 @@ FRAMEWORK-SPECIFIC FILE STRUCTURES:
 RULES:
 - Include all necessary config files (package.json, tailwind.config.js, tsconfig.json) for the chosen framework.
 - Ensure all files have a clear purpose.
+- For landing-page projects, include a structure that supports sectioned storytelling and conversion.
+- Ensure designSystem values are token-ready (color, type, spacing, radius, shadow, motion), not only a single brand color.
 - Output ONLY the JSON object. You may wrap it in a markdown code block; we will strip the fence and parse.`;
 
 // ─── Framework-Specific Code Generator Prompts ──────────────────────────────
@@ -241,7 +294,10 @@ TAILWIND CSS INSTRUCTIONS:
 - For layout: Use flex/grid utilities; avoid absolute positioning unless necessary.
 - In CSS files: Use @tailwind base; @tailwind components; @tailwind utilities;.
 - For animations: Use animate-fade, animate-pulse or custom Tailwind animations.
-- Design: Ensure good contrast, consistent spacing (m/p), and modern aesthetics.`,
+- Design: Ensure good contrast, consistent spacing scale, and modern aesthetics.
+- Use a coherent type scale (display/h1/h2/body/small) and spacing rhythm across sections.
+- CTA buttons must include visible hover and focus-visible states.
+- For landing-page output, build section cadence and conversion-focused content blocks.`,
 
     'plain-css': `
 CSS INSTRUCTIONS:
@@ -250,7 +306,11 @@ CSS INSTRUCTIONS:
 - Use CSS Grid and Flexbox for modern, responsive layouts.
 - Mobile-first approach with media queries.
 - Smooth transitions: transition: all 0.3s ease-in-out;.
-- Include a CSS reset (box-sizing: border-box; margin: 0; padding: 0;).`,
+- Include a CSS reset (box-sizing: border-box; margin: 0; padding: 0;).
+- Define design tokens for color, typography, spacing, radius, shadow, and motion in :root.
+- Use token values consistently; avoid arbitrary one-off values unless justified.
+- Include :focus-visible states for interactive elements.
+- For landing-page output, enforce section rhythm and strong visual hierarchy.`,
 
     'css-modules': `
 CSS MODULES INSTRUCTIONS:
@@ -405,6 +465,17 @@ GLOBAL CODE QUALITY RULES:
 - Import paths must match exactly: if you import from './components/Header', the file must exist at that path.
 - Do NOT use placeholder content like "Lorem ipsum" or "TODO" — generate real, relevant content.`;
 
+const PROJECT_TYPE_QUALITY_RULES = {
+    'landing-page': `
+${LANDING_QUALITY_RUBRIC}
+LANDING STRUCTURE RULES:
+- Ensure a clear conversion funnel from hero to CTA.
+- Use semantic landmarks and section ids for navigation.
+- Include social proof/trust elements (stats, testimonials, logos, or proof points).
+- Include at least one strong CTA block with clear action copy.
+`
+};
+
 // ─── Build the Full Code Generation Prompt ──────────────────────────────────
 export const buildCodeGenPrompt = ({ filePath, framework, projectType, styling, stylingFramework, userPrompt, generatedFiles, planFiles = [] }) => {
     const basePrompt = FRAMEWORK_PROMPTS[framework] || FRAMEWORK_PROMPTS[config.defaultFramework];
@@ -419,6 +490,7 @@ export const buildCodeGenPrompt = ({ filePath, framework, projectType, styling, 
 
     prompt += EXPORT_IMPORT_RULES;
     prompt += stylingInst;
+    prompt += PROJECT_TYPE_QUALITY_RULES[projectType] || '';
     prompt += context;
 
     const otherPlannedPaths = (planFiles || []).filter(f => (f.path || f) !== filePath).map(f => (typeof f === 'string' ? f : f.path));
@@ -468,112 +540,11 @@ export const getMaxTokens = (filePath, complexity) => {
     return isAdvanced ? 6144 : 4096;
 };
 
-// ─── LLM config (Gemini) ─────────────────────────────────────────────────────
-const { model, maxTokensDefault, temperature } = config.llm.gemini;
-
-export const initializeModel = async () => {
-    if (ai) return { ai };
-
-    const apiKey = config.llm.gemini.apiKey;
-    if (!apiKey) {
-        throw new Error("GEMINI_API_KEY (or GOOGLE_API_KEY) is missing in environment variables.");
-    }
-
-    try {
-        logger.info("Initializing Gemini (Google GenAI) client...");
-        ai = new GoogleGenAI({ apiKey });
-        logger.info("Gemini client initialized successfully");
-        return { ai };
-    } catch (e) {
-        logger.error("Failed to initialize Gemini client:", e);
-        throw e;
-    }
-};
-
-// ─── Standard Completion (non-streaming) ────────────────────────────────────
-export const generateCompletion = async (prompt, options = {}) => {
-    try {
-        await initializeModel();
-
-        const systemPrompt = options.systemPrompt || "You are a professional code generator. Output ONLY raw code. NO markdown code fences, NO explanations, NO conversational text, NO backticks around URLs or attributes.";
-
-        const response = await ai.models.generateContent({
-            model: options.model || model,
-            contents: prompt,
-            config: {
-                systemInstruction: systemPrompt,
-                maxOutputTokens: options.maxTokens || maxTokensDefault,
-                temperature: options.temperature ?? temperature,
-            },
-        });
-
-        return response.text ?? '';
-    } catch (e) {
-        logger.error("Generation error:", e);
-        throw e;
-    }
-};
-
-// ─── Fix Completion (non-streaming, lower temperature, repair-focused) ──────
-export const generateFix = async (prompt, options = {}) => {
-    try {
-        await initializeModel();
-
-        const systemPrompt = options.systemPrompt ||
-            "You are a code repair agent. You receive code that has validation errors. " +
-            "Fix ONLY the errors described. Output ONLY the corrected, complete file code. " +
-            "No explanations, no markdown code fences, no conversational text. " +
-            "Preserve all existing functionality and styling.";
-
-        const response = await ai.models.generateContent({
-            model: options.model || model,
-            contents: prompt,
-            config: {
-                systemInstruction: systemPrompt,
-                maxOutputTokens: options.maxTokens || maxTokensDefault,
-                temperature: options.temperature ?? temperature,
-            },
-        });
-
-        return response.text ?? '';
-    } catch (e) {
-        logger.error("Fix generation error:", e);
-        throw e;
-    }
-};
-
-// ─── Streaming Completion ───────────────────────────────────────────────────
-export const generateCompletionStream = async (prompt, options = {}, onChunk) => {
-    try {
-        await initializeModel();
-
-        const systemPrompt = options.systemPrompt || "You are a professional code generator. Output ONLY raw code. NO markdown code fences, NO explanations, NO conversational text, NO backticks around URLs or attributes.";
-
-        const stream = await ai.models.generateContentStream({
-            model: options.model || model,
-            contents: prompt,
-            config: {
-                systemInstruction: systemPrompt,
-                maxOutputTokens: options.maxTokens || maxTokensDefault,
-                temperature: options.temperature ?? temperature,
-            },
-        });
-
-        let fullText = '';
-
-        for await (const chunk of stream) {
-            const text = chunk.text ?? '';
-            if (text) {
-                fullText += text;
-                if (onChunk && typeof onChunk === 'function') {
-                    onChunk(text, fullText);
-                }
-            }
-        }
-
-        return fullText;
-    } catch (e) {
-        logger.error("Streaming generation error:", e);
-        throw e;
-    }
-};
+// MIGRATION SHIM: implementations live in src/services/llm/ (router + providers).
+export {
+    generateCompletion,
+    generateCompletionStream,
+    generateFix,
+    initializeModel,
+    llmRouter,
+} from './llm/index.js';

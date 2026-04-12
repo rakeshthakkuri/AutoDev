@@ -12,13 +12,17 @@
     "test:all": "npm run test:smoke && npm run test:integration && npm run test:auth",
     "test:unit": "node --test test/services/*.test.js",
     "build": "node scripts/check-build.mjs",
-    "start": "PORT=5001 node src/index.js",
+    "start": "node src/index.js",
     "dev": "PORT=5001 node --watch src/index.js",
     "worker": "node src/workers/generation.worker.js",
     "worker:dev": "node --watch src/workers/generation.worker.js",
     "db:migrate": "node src/db/migrate.js",
     "db:status": "psql \"$DATABASE_URL\" -c 'SELECT filename, applied_at FROM schema_migrations ORDER BY filename;'",
-    "kill-port": "lsof -ti:5001 | xargs kill 2>/dev/null || echo 'No process on port 5001'"
+    "kill-port": "lsof -ti:5001 | xargs kill 2>/dev/null || echo 'No process on port 5001'",
+    "test:e2e": "node test/e2e/generation.e2e.js",
+    "test:quick-smoke": "node test/e2e/quick-smoke.js",
+    "fly:launch": "fly launch --no-db --copy-config",
+    "fly:deploy": "fly deploy"
   },
   "keywords": [],
   "author": "",
@@ -50,6 +54,7 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
+    "jszip": "^3.10.1",
     "supertest": "^7.2.2"
   }
 }

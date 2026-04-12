@@ -35,6 +35,19 @@ export interface GenerationPlan {
   stylingFramework: string;
 }
 
+// ─── Health (GET /health) ─────────────────────────────────────────────────────
+
+export interface HealthResponse {
+  status: string;
+  timestamp: string;
+  uptime: number;
+  version: string;
+  agentVersion: string;
+  v1Deprecated: boolean;
+  v2Available: boolean;
+  frameworks: string[];
+}
+
 // ─── Generation state (metrics, phase, fixing) ────────────────────────────────
 
 export type CurrentPhase = 'analyzing' | 'planning' | 'generating' | 'reviewing' | 'complete';

@@ -1,4 +1,16 @@
-import type { AnalyzeRequest, AnalyzeResponse, PlanRequest, PlanResponse, GenerateRequest, SSEEventType, BundleRequest, BundledProject, ZipRequest } from '../types';
+import type {
+  AnalyzeRequest,
+  AnalyzeResponse,
+  PlanRequest,
+  PlanResponse,
+  GenerateRequest,
+  SSEEventType,
+  BundleRequest,
+  BundledProject,
+  ZipRequest,
+  HealthResponse,
+  AsyncGenerateResponse,
+} from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
@@ -9,6 +21,12 @@ const defaultTimeout = 60000;
 export async function getHealth(signal?: AbortSignal): Promise<boolean> {
   const res = await fetch(`${API_URL}/health`, { method: 'GET', signal: signal ?? AbortSignal.timeout(3000) });
   return res.ok;
+}
+
+export async function getHealthDetails(signal?: AbortSignal): Promise<HealthResponse> {
+  const res = await fetch(`${API_URL}/health`, { method: 'GET', signal: signal ?? AbortSignal.timeout(3000) });
+  if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+  return res.json();
 }
 
 // ─── Analyze ──────────────────────────────────────────────────────────────────
@@ -137,6 +155,56 @@ export async function generateProjectStream(
     body: JSON.stringify(body),
     signal,
   });
+
+  if (res.status === 202) {
+    const meta = (await res.json().catch(() => ({}))) as Partial<AsyncGenerateResponse>;
+    const streamUrl = meta.streamUrl;
+    if (!streamUrl || typeof streamUrl !== 'string') {
+      throw new Error('Async generation accepted but no streamUrl returned');
+    }
+    const streamRes = await fetch(streamUrl, { method: 'GET', signal, headers: sessionId ? { 'X-Session-Id': sessionId } : undefined });
+    if (!streamRes.ok) {
+      const errorBody = await streamRes.json().catch(() => ({ error: 'Progress stream failed' }));
+      throw new Error(
+        typeof errorBody.error === 'string' ? errorBody.error : (errorBody.error?.message ?? `Server error ${streamRes.status}`)
+      );
+    }
+    const reader = streamRes.body?.getReader();
+    if (!reader) throw new Error('No progress stream body');
+    await parseSSEStream(
+      reader,
+      (eventName, data) => {
+        const d = data as Record<string, unknown>;
+        if (eventName === 'progress') {
+          onEvent('status', {
+            message: 'Generating…',
+            progress: (d.progress as number) ?? 0,
+            generationId: d.jobId,
+          });
+          return;
+        }
+        if (eventName === 'complete') {
+          const storagePath = d.storagePath as string | undefined;
+          const downloadUrl = (d.downloadUrl as string) ?? (storagePath ? `/download/${storagePath}` : undefined);
+          onEvent('generation_complete', {
+            message: 'Project generated successfully',
+            projectId: storagePath,
+            downloadUrl,
+            metrics: { duration: 0, filesGenerated: (d.filesGenerated as number) ?? 0 },
+            error: null,
+          });
+          return;
+        }
+        if (eventName === 'error') {
+          onEvent('generation_error', { error: (d.error as string) || 'Generation failed' });
+          return;
+        }
+        onEvent(eventName as SSEEventType, data);
+      },
+      signal
+    );
+    return;
+  }
 
   if (!res.ok) {
     const errorBody = await res.json().catch(() => ({ error: 'Generation request failed' }));

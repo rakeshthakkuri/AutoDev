@@ -138,16 +138,11 @@ export const GenerationStore = create<GenerationState>((set, get) => {
         const { sessionId: _sid, ...analyzePayload } = analyzeRes;
         const requirements = { ...analyzePayload, complexity: selectedComplexity };
         const analysisWarning =
-          (analyzeRes as any).usedFallback && (analyzeRes as any).warning
-            ? (analyzeRes as any).warning
-            : null;
+          analyzeRes.usedFallback && analyzeRes.warning ? analyzeRes.warning : null;
         set({ progress: 15, currentPhase: 'planning', analysisFallbackWarning: analysisWarning });
 
         const plan = await getPlan({ requirements }, { signal });
-        const planWarning =
-          (plan as any).usedFallback && (plan as any).warning
-            ? (plan as any).warning
-            : null;
+        const planWarning = plan.usedFallback && plan.warning ? plan.warning : null;
         set({ progress: 25, currentPhase: 'generating', planFallbackWarning: planWarning });
 
         await generateProjectStream(

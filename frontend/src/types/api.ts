@@ -19,6 +19,8 @@ export interface AnalyzeResponse extends Record<string, unknown> {
   colorScheme?: string;
   layout?: string;
   description?: string;
+  usedFallback?: boolean;
+  warning?: string;
 }
 
 // ─── Plan ───────────────────────────────────────────────────────────────────
@@ -27,7 +29,10 @@ export interface PlanRequest {
   requirements: Record<string, unknown>;
 }
 
-export type PlanResponse = GenerationPlan;
+export interface PlanResponse extends GenerationPlan {
+  usedFallback?: boolean;
+  warning?: string;
+}
 
 // ─── Generate (SSE) ──────────────────────────────────────────────────────────
 
@@ -46,7 +51,18 @@ export type SSEEventType =
   | 'file_fixed'
   | 'file_error'
   | 'generation_complete'
-  | 'generation_error';
+  | 'generation_error'
+  | 'progress'
+  | 'complete'
+  | 'error';
+
+/** Body returned when POST /api/generate responds with 202 Accepted (async job + progress stream). */
+export interface AsyncGenerateResponse {
+  jobId: string;
+  status: string;
+  statusUrl: string;
+  streamUrl: string;
+}
 
 export interface GenerateStreamCallbacks {
   onEvent: (event: SSEEventType, data: unknown) => void;

@@ -15,6 +15,32 @@ const config = {
     isDev: env === 'development',
     isProd: env === 'production',
 
+    // ── PostgreSQL
+    databaseUrl: process.env.DATABASE_URL || null,
+
+    // ── Storage (Phase 1.5 / 2.3)
+    storageProvider: process.env.STORAGE_PROVIDER || 'local',
+    generatedDir: process.env.GENERATED_DIR || 'generated',
+
+    // ── S3 (Phase 2.3)
+    s3Bucket: process.env.S3_BUCKET || null,
+    s3Region: process.env.S3_REGION || 'us-east-1',
+    s3Prefix: process.env.S3_PREFIX || 'projects',
+    s3Endpoint: process.env.S3_ENDPOINT || null,
+    awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || null,
+    awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || null,
+
+    // ── Queue (Phase 2.1)
+    queueConcurrency: parseInt(process.env.WORKER_CONCURRENCY, 10) || 3,
+
+    // ── Cleanup job (Phase 2.5)
+    projectRetentionDays: parseInt(process.env.PROJECT_RETENTION_DAYS, 10) || 7,
+    cleanupIntervalHours: parseInt(process.env.CLEANUP_INTERVAL_HOURS, 10) || 24,
+
+    // ── Auth (Phase 3.2)
+    jwtSecret: process.env.JWT_SECRET || null,
+    jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || null,
+
     // ── Server
     port: parseInt(process.env.PORT, 10) || 5001,
     corsOrigins: process.env.CORS_ORIGINS
@@ -23,34 +49,26 @@ const config = {
             ? [frontendUrl]
             : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'],
 
-    // ── LLM Provider
+    // ── LLM Provider (Gemini only at runtime)
     llm: {
-        provider: process.env.LLM_PROVIDER || 'gemini',  // 'gemini' | 'anthropic' | 'openai'
+        // MULTI-PROVIDER: Not yet implemented. Only Gemini is active at runtime.
+        // Track in: docs/decisions/ADR-001-llm-provider.md
+        // Do not add openai/anthropic keys here until src/services/llm/ provider abstraction is built (Phase 1, Task 1.3).
 
-        // Google Gemini (default)
         gemini: {
             apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
-            model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+            model: process.env.GEMINI_MODEL || process.env.LLM_MODEL || 'gemini-2.5-flash',
             maxTokensDefault: parseInt(process.env.LLM_MAX_TOKENS, 10) || 4096,
             maxTokensLarge: parseInt(process.env.LLM_MAX_TOKENS_LARGE, 10) || 8192,
             temperature: parseFloat(process.env.LLM_TEMPERATURE) || 0.1,
         },
-
-        // Anthropic (optional)
-        anthropic: {
-            apiKey: process.env.ANTHROPIC_API_KEY || '',
-            model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
-            maxTokensDefault: parseInt(process.env.LLM_MAX_TOKENS, 10) || 4096,
-            maxTokensLarge: parseInt(process.env.LLM_MAX_TOKENS_LARGE, 10) || 8192,
-            temperature: parseFloat(process.env.LLM_TEMPERATURE) || 0.1,
-        },
-
-        // OpenAI (future support)
         openai: {
             apiKey: process.env.OPENAI_API_KEY || '',
             model: process.env.OPENAI_MODEL || 'gpt-4o',
-            maxTokensDefault: 4096,
-            temperature: 0.1,
+        },
+        anthropic: {
+            apiKey: process.env.ANTHROPIC_API_KEY || '',
+            model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
         },
     },
 
@@ -95,6 +113,9 @@ const config = {
         maxFileSize: 5 * 1024 * 1024,   // 5MB
         maxFiles: 5,
     },
+
+    // ── Agent version — v2 only (Phase 1.6)
+    agentVersion: 'v2',
 
     // ── Supported frameworks/styling (single source of truth for validation and prompts)
     defaultFramework: 'vanilla-js',

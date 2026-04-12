@@ -1,30 +1,24 @@
 import express from 'express';
 import path from 'path';
-import fs from 'fs';
 import { createZip, zipDirectory } from '../services/zipper.js';
 import logger from '../services/logger.js';
+import { Errors } from '../utils/errors.js';
+import { LocalStorage } from '../services/storage/LocalStorage.js';
 
-// Validate that a resolved path stays within the allowed base directory
-function isWithinDir(base, target) {
-    const resolvedBase = path.resolve(base);
-    const resolvedTarget = path.resolve(target);
-    return resolvedTarget.startsWith(resolvedBase + path.sep) || resolvedTarget === resolvedBase;
-}
-
-// Sanitize a filename for use in Content-Disposition header
 function sanitizeFilename(name) {
     return name.replace(/[^\w.\-]/g, '_').substring(0, 100) || 'project';
 }
 
-export function createDownloadRouter(generatedDir) {
+/**
+ * @param {import('../services/storage/StorageService.js').StorageService} storageService
+ */
+export function createDownloadRouter(storageService) {
     const router = express.Router();
 
-    // GET /download/:projectId - Download a previously generated project from disk
-    router.get('/:projectId', async (req, res) => {
+    router.get('/:projectId', async (req, res, next) => {
         try {
             const { projectId } = req.params;
 
-            // Basic validation: reject empty, extremely long, or traversal-like IDs
             if (
                 !projectId ||
                 typeof projectId !== 'string' ||
@@ -33,56 +27,56 @@ export function createDownloadRouter(generatedDir) {
                 projectId.includes('/') ||
                 projectId.includes('\\')
             ) {
-                return res.status(400).json({ error: 'Invalid project ID format' });
+                return next(Errors.badRequest('Invalid project ID format'));
             }
 
-            const projectDir = path.join(generatedDir, projectId);
-
-            // Guard against path traversal
-            if (!isWithinDir(generatedDir, projectDir)) {
-                logger.warn(`Path traversal attempt blocked: ${projectId}`);
-                return res.status(403).json({ error: 'Access denied' });
+            if (!(await storageService.projectExists(projectId))) {
+                return next(Errors.notFound('Project not found'));
             }
 
-            if (!fs.existsSync(projectDir)) {
-                return res.status(404).json({ error: 'Project not found' });
+            let zipBuffer;
+            if (storageService instanceof LocalStorage) {
+                zipBuffer = await zipDirectory(storageService.getProjectDir(projectId));
+            } else {
+                const rels = await storageService.listFiles(projectId);
+                const files = {};
+                for (const rel of rels) {
+                    files[rel] = await storageService.readFile(projectId, rel);
+                }
+                zipBuffer = await createZip(files);
             }
 
-            const zipBuffer = await zipDirectory(projectDir);
             const safeFilename = sanitizeFilename(projectId);
-
             res.setHeader('Content-Type', 'application/zip');
             res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.zip"`);
             res.send(zipBuffer);
         } catch (error) {
             logger.error('Project download error:', error);
-            res.status(500).json({ error: 'Internal server error during project download' });
+            next(error);
         }
     });
 
-    // POST /download/zip - Create and download a ZIP from provided file map (in-memory)
-    router.post('/zip', async (req, res) => {
+    router.post('/zip', async (req, res, next) => {
         try {
             const { files, filename = 'project.zip' } = req.body;
 
             if (!files || typeof files !== 'object' || Array.isArray(files)) {
-                return res.status(400).json({ error: 'Files are required and must be an object' });
+                return next(Errors.badRequest('Files are required and must be an object'));
             }
 
-            // Validate all file paths to prevent path traversal in the ZIP
             const MAX_FILES = 200;
             const entries = Object.entries(files);
             if (entries.length > MAX_FILES) {
-                return res.status(400).json({ error: `Too many files (max ${MAX_FILES})` });
+                return next(Errors.badRequest(`Too many files (max ${MAX_FILES})`));
             }
 
             const sanitizedFiles = {};
             for (const [filePath, content] of entries) {
                 if (typeof filePath !== 'string' || filePath.includes('..') || path.isAbsolute(filePath)) {
-                    return res.status(400).json({ error: `Invalid file path: ${filePath}` });
+                    return next(Errors.badRequest(`Invalid file path: ${filePath}`));
                 }
                 if (typeof content !== 'string') {
-                    return res.status(400).json({ error: `File content must be a string: ${filePath}` });
+                    return next(Errors.badRequest(`File content must be a string: ${filePath}`));
                 }
                 sanitizedFiles[filePath] = content;
             }
@@ -95,7 +89,7 @@ export function createDownloadRouter(generatedDir) {
             res.send(zipBuffer);
         } catch (error) {
             logger.error('ZIP creation error:', error);
-            res.status(500).json({ error: 'Internal server error during ZIP creation' });
+            next(error);
         }
     });
 

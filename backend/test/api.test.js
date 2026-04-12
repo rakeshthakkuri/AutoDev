@@ -1,13 +1,16 @@
-import { describe, it, before } from 'node:test';
-import assert from 'node:assert';
-import request from 'supertest';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.join(__dirname, '..', '..');
-const GENERATED_DIR = path.join(PROJECT_ROOT, 'generated');
+const BACKEND_ROOT = path.join(__dirname, '..');
+const GENERATED_DIR = path.join(BACKEND_ROOT, 'generated');
+// Align with storage LocalStorage base before config loads (dotenv may set a different path).
+process.env.GENERATED_DIR = GENERATED_DIR;
+
+import { describe, it, before } from 'node:test';
+import assert from 'node:assert';
+import request from 'supertest';
 
 describe('API', () => {
     let app;
@@ -20,10 +23,10 @@ describe('API', () => {
     // ── Health ────────────────────────────────────────────────────────────────
 
     describe('GET /health', () => {
-        it('returns 200 and healthy status', async () => {
+        it('returns 200 and ok status', async () => {
             const res = await request(app).get('/health');
             assert.strictEqual(res.status, 200);
-            assert.strictEqual(res.body.status, 'healthy');
+            assert.strictEqual(res.body.status, 'ok');
             assert.ok(res.body.timestamp);
             assert.ok(Array.isArray(res.body.frameworks));
             assert.ok(res.body.frameworks.length >= 8);

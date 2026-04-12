@@ -38,9 +38,9 @@
 .navbar-logo:hover { opacity: 0.85; }
 
 .navbar-logo-icon {
-  color: var(--accent-color);
+  color: #a78bfa;
   flex-shrink: 0;
-  filter: drop-shadow(0 0 6px var(--glow-accent));
+  filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.4));
 }
 
 .navbar-actions {
@@ -109,14 +109,15 @@
 }
 
 .navbar-version {
-  font-size: 0.78rem;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  background: var(--accent-subtle);
-  color: var(--accent-color);
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(139, 92, 246, 0.08));
+  color: #a78bfa;
   font-weight: 600;
   margin-left: var(--space-2);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
+  border: 1px solid rgba(99, 102, 241, 0.15);
 }
 
 .navbar-storage-warning {

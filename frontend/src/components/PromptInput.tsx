@@ -41,9 +41,9 @@ const COMPLEXITY_OPTIONS = [
 
 const FRAMEWORK_TEMPLATES: Record<string, string[]> = {
   auto: [
-    "Create a modern landing page with hero section, features, and pricing",
-    "Build a task manager with add, edit, delete, and filtering",
-    "Make a portfolio website with project gallery and contact form",
+    "Create a premium SaaS landing page for AI analytics targeting startup founders, with hero, social proof, feature story, testimonials, pricing CTA, and polished motion.",
+    "Build a modern task manager for remote teams with clean dashboard UX, keyboard shortcuts, smart filters, and empty/loading/error states.",
+    "Design an editorial-style portfolio for a product designer with strong typography, case-study highlights, testimonials, and a clear contact conversion path.",
   ],
   'vanilla-js': [
     "Build a weather app that fetches and displays current conditions with a clean UI",
@@ -61,9 +61,9 @@ const FRAMEWORK_TEMPLATES: Record<string, string[]> = {
     "Make a React+TS real-time chat interface with message history",
   ],
   nextjs: [
-    "Create a Next.js blog with Tailwind, markdown rendering, and search",
-    "Build a Next.js portfolio with page transitions and dark mode toggle",
-    "Make a Next.js SaaS landing with pricing, FAQs, and newsletter signup",
+    "Create a Next.js blog with Tailwind, markdown rendering, search, and strong reading UX with typography scale.",
+    "Build a Next.js portfolio with polished page transitions, dark mode toggle, and conversion-focused case-study layout.",
+    "Make a premium Next.js SaaS landing with trust logos, testimonial cards, pricing comparison, FAQ, and clear demo-booking CTA.",
   ],
   vue: [
     "Build a Vue.js dashboard with sidebar, data visualization, and dark mode",
@@ -223,7 +223,7 @@ export default function PromptInput({ onGenerate, initialValue = '' }: PromptInp
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={`Describe your project... (${currentFramework.label})\n\nTip: Be specific about features, pages, and interactions you want.`}
+        placeholder={`Describe your project... (${currentFramework.label})\n\nTip: include audience, brand style, sections, conversion goal, and desired interactions.`}
         rows={5}
         disabled={isGenerating}
         aria-label="Project description"

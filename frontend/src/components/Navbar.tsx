@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Sparkles, Home, History, Save, Download, Plus, Sun, Moon } from 'lucide-react';
+import { Sparkles, Home, History, Save, Download, Plus, Sun, Moon, Menu } from 'lucide-react';
 import { GenerationStore } from '../store/generation';
 import { useSettingsStore } from '../store/settings';
 import { getStorageInfo } from '../services/storage';
@@ -9,6 +9,7 @@ interface NavbarProps {
   onSaveClick?: () => void;
   onDownloadClick?: () => void;
   onNewProject?: () => void;
+  onMenuOpen?: () => void;
   showSave?: boolean;
   showDownload?: boolean;
   showNew?: boolean;
@@ -19,11 +20,13 @@ export default function Navbar({
   onSaveClick,
   onDownloadClick,
   onNewProject,
+  onMenuOpen,
   showSave = false,
   showDownload = false,
   showNew = false,
 }: NavbarProps) {
   const location = useLocation();
+  const isLanding = location.pathname === '/';
   const fileCount = GenerationStore((s) => Object.keys(s.files).length);
   const hasEdits = GenerationStore((s) => Object.keys(s.editedFiles).length > 0);
   const canSave = fileCount > 0;
@@ -32,7 +35,7 @@ export default function Navbar({
   const toggleTheme = useSettingsStore((s) => s.toggleTheme);
 
   return (
-    <header className="navbar" role="banner">
+    <header className={`navbar ${isLanding ? 'landing-nav' : ''}`} role="banner">
       <div className="navbar-inner">
         <Link to="/" className="navbar-logo" aria-label="AI Code Generator Home">
           <Sparkles className="navbar-logo-icon" size={22} />
@@ -41,6 +44,11 @@ export default function Navbar({
         </Link>
 
         <nav className="navbar-actions" aria-label="Main navigation">
+          {isLanding && (
+            <button type="button" onClick={onMenuOpen} className="navbar-btn navbar-btn-menu" title="Menu" aria-label="Open menu">
+              <Menu size={22} />
+            </button>
+          )}
           <Link to="/" className={`navbar-btn ${location.pathname === '/' ? 'active' : ''}`} title="Home" aria-label="Home" aria-current={location.pathname === '/' ? 'page' : undefined}>
             <Home size={16} /><span>Home</span>
           </Link>

@@ -4,6 +4,7 @@ import path from 'path';
 import { execSync } from 'child_process';
 import crypto from 'crypto';
 import config from '../config.js';
+import { validateImportResolution, auditPackageDependencies } from './importResolver.js';
 
 export class CodeValidator {
     constructor() {
@@ -207,7 +208,7 @@ export class CodeValidator {
 
     // ─── CSS / SCSS Validation ──────────────────────────────────────────
 
-    validateCss(code, filePath = '') {
+    validateCss(code, filePath = '', framework = config.defaultFramework) {
         const errors = [], warnings = [];
         let fixedCode = code;
 
@@ -222,6 +223,14 @@ export class CodeValidator {
                     fixedCode += '\n' + '}'.repeat(open - close);
                     warnings.push(`Auto-added ${open - close} closing brace(s) for CSS`);
                 }
+            }
+        }
+
+        // Tailwind directives are invalid in vanilla projects without a build step.
+        if (framework === config.defaultFramework) {
+            const hasTailwindDirectives = /@tailwind\b|@apply\b|@layer\b/.test(code);
+            if (hasTailwindDirectives) {
+                errors.push('Tailwind directives detected in vanilla-js CSS without build pipeline');
             }
         }
 
@@ -757,7 +766,7 @@ export class CodeValidator {
             if (ext === '.html' || fname === 'index.html') {
                 result = { ...result, ...this.validateHtml(cleanCode, filePath, framework) };
             } else if (ext === '.css' || ext === '.scss') {
-                result = { ...result, ...this.validateCss(cleanCode, filePath) };
+                result = { ...result, ...this.validateCss(cleanCode, filePath, framework) };
             } else if (ext === '.js' && !fname.endsWith('.config.js')) {
                 result = { ...result, ...this.validateJavascript(cleanCode, filePath) };
             } else if (ext === '.jsx') {
@@ -807,6 +816,8 @@ export class CodeValidator {
     validateProjectStructure(files, framework) {
         const warnings = [];
         const filePaths = Object.keys(files);
+        const landingCandidates = [];
+        const cssLikeFiles = [];
 
         const checks = {
             [config.defaultFramework]: () => {
@@ -846,6 +857,13 @@ export class CodeValidator {
         // Cross-file import consistency
         for (const [fp, content] of Object.entries(files)) {
             if (typeof content !== 'string') continue;
+            const extForQuality = path.extname(fp).toLowerCase();
+            if (['.css', '.scss'].includes(extForQuality)) {
+                cssLikeFiles.push({ fp, content });
+            }
+            if (this._looksLikeLandingEntry(fp, content)) {
+                landingCandidates.push({ fp, content });
+            }
 
             // Match all relative imports: import ... from './path' or require('./path')
             const importPatterns = [
@@ -943,6 +961,47 @@ export class CodeValidator {
             }
         }
 
+        // Landing-page quality checks
+        for (const { fp, content } of landingCandidates) {
+            const sectionCount = (content.match(/<section\b/gi) || []).length;
+            if (sectionCount < 4) {
+                warnings.push(`${fp}: landing page has only ${sectionCount} section(s); target at least 4-6 meaningful sections`);
+            }
+
+            const hasMain = /<main[\s>]/i.test(content);
+            const hasHeader = /<header[\s>]/i.test(content);
+            const hasFooter = /<footer[\s>]/i.test(content);
+            if (!(hasMain && hasHeader && hasFooter)) {
+                warnings.push(`${fp}: landing page should include semantic landmarks (header, main, footer)`);
+            }
+
+            const hasH1 = /<h1[\s>]/i.test(content);
+            const hasH2 = /<h2[\s>]/i.test(content);
+            if (!hasH1 || !hasH2) {
+                warnings.push(`${fp}: weak heading hierarchy; include clear h1 and supporting h2 sections`);
+            }
+
+            const inlineStyleCount = (content.match(/\sstyle=\s*["'{]/gi) || []).length;
+            if (inlineStyleCount > 4) {
+                warnings.push(`${fp}: excessive inline styles (${inlineStyleCount}); prefer tokenized classes/stylesheets`);
+            }
+        }
+
+        for (const { fp, content } of cssLikeFiles) {
+            const hasMediaQuery = /@media\s*\(/i.test(content);
+            if (!hasMediaQuery) {
+                warnings.push(`${fp}: missing responsive media queries`);
+            }
+
+            const hardcodedColorCount = (
+                content.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g) || []
+            ).length;
+            const tokenColorCount = (content.match(/var\(--[^)]+\)/g) || []).length;
+            if (hardcodedColorCount > 18 && tokenColorCount < 5) {
+                warnings.push(`${fp}: many hardcoded color values with low token usage; move to design tokens`);
+            }
+        }
+
         // React/components: warn when multiple files define the same component name
         const componentNameToFiles = {};
         for (const fp of filePaths) {
@@ -974,7 +1033,43 @@ export class CodeValidator {
         return { isValid: warnings.length === 0, warnings };
     }
 
+    _looksLikeLandingEntry(filePath, content) {
+        const ext = path.extname(filePath).toLowerCase();
+        if (!['.html', '.jsx', '.tsx', '.vue', '.svelte', '.astro'].includes(ext)) {
+            return false;
+        }
+
+        const lowerPath = filePath.toLowerCase();
+        const likelyEntry = lowerPath.includes('index') || lowerPath.includes('app') || lowerPath.includes('page');
+        if (!likelyEntry) return false;
+
+        const lowerContent = content.toLowerCase();
+        const landingSignals = ['hero', 'features', 'testimonial', 'pricing', 'cta', 'landing'];
+        const signalHits = landingSignals.filter(signal => lowerContent.includes(signal)).length;
+        return signalHits >= 2;
+    }
+
     getMetrics() {
         return { ...this.validationMetrics };
+    }
+
+    /**
+     * Cross-file import resolution + package.json audit (static analysis).
+     * @param {Record<string, string>} projectFiles
+     */
+    validateProjectImports(projectFiles) {
+        const importIssues = validateImportResolution(projectFiles);
+        const { missing: missingDeps } = auditPackageDependencies(projectFiles);
+
+        return {
+            importIssues,
+            missingPackages: missingDeps,
+            hasErrors: importIssues.filter(i => i.severity === 'error').length > 0 || missingDeps.length > 0,
+            summary: {
+                importErrors: importIssues.filter(i => i.type === 'FILE_NOT_FOUND').length,
+                missingExports: importIssues.filter(i => i.type !== 'FILE_NOT_FOUND').length,
+                missingPackages: missingDeps.length,
+            },
+        };
     }
 }

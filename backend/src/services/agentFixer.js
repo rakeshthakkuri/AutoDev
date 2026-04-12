@@ -7,6 +7,9 @@ import { generateFix, getMaxTokens } from './llm.js';
 import { CodeValidator } from './validator.js';
 import logger from './logger.js';
 import config from '../config.js';
+import { sortFilesByDependency } from '../agents/planner/dependencyGraph.js';
+import { validateImportResolution } from './importResolver.js';
+import { compressContract } from '../agents/shared/contracts.js';
 
 export class AgentFixer {
     /**
@@ -65,7 +68,7 @@ export class AgentFixer {
 
             try {
                 // If errors mention truncation, give the LLM more room to output a full file
-                const providerConfig = config.llm[config.llm.provider];
+                const providerConfig = config.llm.gemini;
                 const maxTokens = isTruncationError
                     ? Math.max(getMaxTokens(filePath, 'advanced'), providerConfig.maxTokensLarge)
                     : getMaxTokens(filePath, 'intermediate');
@@ -203,6 +206,87 @@ export class AgentFixer {
     }
 
     /**
+     * Fix import/export issues in topological (dependency-first) order.
+     * @param {Record<string, string>} projectFiles
+     * @param {{ importIssues: object[] }} validationResult
+     * @param {import('../agents/shared/memory.js').ProjectMemory | null} memory
+     * @param {string} framework
+     * @param {string} [userPrompt]
+     * @param {(msg: string) => void} [onProgress]
+     */
+    async fixProjectInOrder(projectFiles, validationResult, memory, framework, userPrompt = '', onProgress) {
+        const MAX_PASSES = 2;
+        let currentFiles = { ...projectFiles };
+        let currentIssues = validationResult.importIssues || [];
+
+        for (let pass = 0; pass < MAX_PASSES; pass++) {
+            if (currentIssues.length === 0) break;
+
+            logger.info(`Import repair pass ${pass + 1}`, { issueCount: currentIssues.length });
+
+            const issuesByFile = {};
+            for (const issue of currentIssues) {
+                if (!issuesByFile[issue.file]) issuesByFile[issue.file] = [];
+                issuesByFile[issue.file].push(issue);
+            }
+
+            const filesToFix = Object.keys(issuesByFile);
+            const planLike = { files: filesToFix.map(p => ({ path: p })) };
+            const sortedPaths = sortFilesByDependency(planLike);
+
+            for (const filePath of sortedPaths) {
+                const issues = issuesByFile[filePath];
+                if (!issues) continue;
+                const fileCode = currentFiles[filePath];
+                if (!fileCode) continue;
+
+                onProgress?.(`Repairing ${filePath} (${issues.length} issue${issues.length !== 1 ? 's' : ''})`);
+
+                const errorContext = buildImportRepairContext(issues, currentFiles);
+
+                try {
+                    const result = await this.fixFileWithFeedback({
+                        code: fileCode,
+                        filePath,
+                        errors: [errorContext],
+                        warnings: [],
+                        userPrompt: userPrompt || 'Fix import/export mismatches only.',
+                        contextFiles: currentFiles,
+                        framework,
+                        onFixAttempt: () => {},
+                    });
+
+                    if (result.code && result.code !== fileCode) {
+                        currentFiles[filePath] = result.code;
+                        if (memory) {
+                            memory.setFileFixed(filePath, result.code, result.validation);
+                            memory.recordGeneratedContract(filePath, compressContract(filePath, result.code));
+                        }
+                        logger.info('Import repair updated file', { filePath });
+                    }
+                } catch (err) {
+                    logger.warn('Import repair failed for file', { filePath, error: err.message });
+                }
+            }
+
+            const newIssues = validateImportResolution(currentFiles);
+            logger.info(`Import repair pass ${pass + 1} complete`, {
+                before: currentIssues.length,
+                after: newIssues.length,
+            });
+
+            if (newIssues.length >= currentIssues.length && pass > 0) break;
+            currentIssues = newIssues;
+        }
+
+        return {
+            files: currentFiles,
+            remainingIssues: currentIssues,
+            repaired: currentIssues.length === 0,
+        };
+    }
+
+    /**
      * Build the repair prompt for the LLM.
      */
     _buildFixPrompt({ code, filePath, errors, warnings, userPrompt, contextFiles, importingFiles }) {
@@ -298,4 +382,23 @@ ${warnings.map((w, i) => `${i + 1}. ${w}`).join('\n')}
 
         return cleaned;
     }
+}
+
+function buildImportRepairContext(issues, projectFiles) {
+    const lines = ['The following import/export issues were found in this file:'];
+
+    for (const issue of issues) {
+        lines.push(`\n[${issue.type}] ${issue.message}`);
+        if (issue.availableExports?.length) {
+            lines.push(`  Available exports from ${issue.targetFile}: ${issue.availableExports.join(', ')}`);
+        }
+        if (issue.type === 'FILE_NOT_FOUND') {
+            lines.push(`  The import path "${issue.importedPath}" does not resolve to a project file.`);
+        }
+    }
+
+    lines.push('\nFix ALL import statements to use correct export names and paths.');
+    lines.push('Do not change application logic — only fix imports/exports.');
+
+    return lines.join('\n');
 }

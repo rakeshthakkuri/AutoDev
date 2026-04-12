@@ -435,7 +435,8 @@ export class AnalysisService {
                 const response = await generateCompletion(prompt, {
                     maxTokens: 800,
                     temperature: 0.1,
-                    systemPrompt: this.jsonSystemPrompt
+                    systemPrompt: this.jsonSystemPrompt,
+                    responseMimeType: 'application/json'
                 });
 
                 const result = this._extractJsonPayload(this._normalize(response), prompt);
@@ -499,7 +500,8 @@ export class AnalysisService {
                 const response = await generateCompletion(prompt, {
                     maxTokens: 1500,
                     temperature: 0.1,
-                    systemPrompt: planSystemPrompt
+                    systemPrompt: planSystemPrompt,
+                    responseMimeType: 'application/json'
                 });
 
                 const result = this._extractJsonPayload(this._normalize(response), prompt);
@@ -577,6 +579,40 @@ export class AnalysisService {
         let parsed = AnalysisService.tryParseJson(cleaned);
         if (parsed !== null) return parsed;
 
+        // Try balanced JSON object extraction from first "{"
+        const firstObject = cleaned.indexOf('{');
+        if (firstObject !== -1) {
+            let depth = 0;
+            let inString = false;
+            let escaped = false;
+            for (let i = firstObject; i < cleaned.length; i++) {
+                const ch = cleaned[i];
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (ch === '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (ch === '"') {
+                    inString = !inString;
+                    continue;
+                }
+                if (inString) continue;
+                if (ch === '{') depth++;
+                if (ch === '}') {
+                    depth--;
+                    if (depth === 0) {
+                        const candidate = cleaned.slice(firstObject, i + 1);
+                        parsed = AnalysisService.tryParseJson(candidate);
+                        if (parsed !== null) return parsed;
+                        break;
+                    }
+                }
+            }
+        }
+
         // Try from start to last }
         const lastBrace = cleaned.lastIndexOf('}');
         if (lastBrace > 0) {
@@ -635,6 +671,124 @@ export class AnalysisService {
         return 'plain-css';
     }
 
+    _coerceStylingFramework(framework, stylingFramework) {
+        // Vanilla projects do not have a build step; force plain CSS to avoid broken @tailwind/@apply output.
+        if (framework === config.defaultFramework) return 'plain-css';
+        return stylingFramework;
+    }
+
+    _defaultDesignIntent(projectType) {
+        if (projectType === 'landing-page') {
+            return {
+                styleDirection: 'premium-modern',
+                targetAudience: 'general web audience',
+                conversionGoal: 'signup',
+                visualDensity: 'balanced',
+                qualityBar: 'premium'
+            };
+        }
+        return {
+            styleDirection: 'modern',
+            targetAudience: 'general users',
+            conversionGoal: 'engagement',
+            visualDensity: 'balanced',
+            qualityBar: 'standard'
+        };
+    }
+
+    _normalizeDesignIntent(designIntent, projectType) {
+        const defaults = this._defaultDesignIntent(projectType);
+        if (!designIntent || typeof designIntent !== 'object') {
+            return defaults;
+        }
+        return {
+            styleDirection: designIntent.styleDirection || defaults.styleDirection,
+            targetAudience: designIntent.targetAudience || defaults.targetAudience,
+            conversionGoal: designIntent.conversionGoal || defaults.conversionGoal,
+            visualDensity: designIntent.visualDensity || defaults.visualDensity,
+            qualityBar: designIntent.qualityBar || defaults.qualityBar
+        };
+    }
+
+    _defaultDesignSystem(projectType) {
+        const base = {
+            primaryColor: '#4f46e5',
+            colorPalette: {
+                background: '#ffffff',
+                surface: '#f8fafc',
+                text: '#0f172a',
+                mutedText: '#475569',
+                accent: '#4f46e5'
+            },
+            fontFamily: 'Inter',
+            typeScale: {
+                display: 'clamp(2.25rem, 6vw, 4rem)',
+                h1: 'clamp(1.875rem, 4vw, 3rem)',
+                h2: 'clamp(1.5rem, 3vw, 2.25rem)',
+                body: '1rem',
+                small: '0.875rem'
+            },
+            spacingScale: ['4px', '8px', '12px', '16px', '24px', '32px', '48px', '64px'],
+            radiusScale: { sm: '8px', md: '12px', lg: '20px' },
+            shadowScale: {
+                soft: '0 4px 16px rgba(15, 23, 42, 0.08)',
+                medium: '0 12px 32px rgba(15, 23, 42, 0.14)'
+            },
+            motion: {
+                durationFast: '160ms',
+                durationNormal: '280ms',
+                easing: 'cubic-bezier(0.22, 1, 0.36, 1)'
+            }
+        };
+
+        if (projectType === 'landing-page') {
+            return {
+                ...base,
+                colorPalette: {
+                    background: '#ffffff',
+                    surface: '#f8fafc',
+                    text: '#020617',
+                    mutedText: '#334155',
+                    accent: '#4f46e5'
+                }
+            };
+        }
+
+        return base;
+    }
+
+    _normalizeDesignSystem(designSystem, projectType) {
+        const defaults = this._defaultDesignSystem(projectType);
+        const ds = designSystem && typeof designSystem === 'object' ? designSystem : {};
+        return {
+            primaryColor: ds.primaryColor || defaults.primaryColor,
+            colorPalette: {
+                ...defaults.colorPalette,
+                ...(ds.colorPalette || {})
+            },
+            fontFamily: ds.fontFamily || defaults.fontFamily,
+            typeScale: {
+                ...defaults.typeScale,
+                ...(ds.typeScale || {})
+            },
+            spacingScale: Array.isArray(ds.spacingScale) && ds.spacingScale.length > 0
+                ? ds.spacingScale
+                : defaults.spacingScale,
+            radiusScale: {
+                ...defaults.radiusScale,
+                ...(ds.radiusScale || {})
+            },
+            shadowScale: {
+                ...defaults.shadowScale,
+                ...(ds.shadowScale || {})
+            },
+            motion: {
+                ...defaults.motion,
+                ...(ds.motion || {})
+            }
+        };
+    }
+
     _getAnalysisFallback(userPrompt, options = {}) {
         const projectType = this._inferProjectType(userPrompt);
         const framework = options.framework && options.framework !== 'auto'
@@ -643,17 +797,19 @@ export class AnalysisService {
         const stylingFramework = options.styling && options.styling !== 'auto'
             ? options.styling
             : this._inferStylingFramework(userPrompt);
+        const safeStylingFramework = this._coerceStylingFramework(framework, stylingFramework);
 
         return {
             projectType,
             features: ['responsive design', 'modern UI', 'interactive elements'],
             styling: 'modern',
             framework,
-            stylingFramework,
+            stylingFramework: safeStylingFramework,
             complexity: 'simple',
             colorScheme: '',
             layout: '',
             description: `A ${projectType} built with ${framework}`,
+            designIntent: this._defaultDesignIntent(projectType),
             isFallback: true,
             usedFallback: true,
             warning: 'Could not parse AI response; using default requirements.'
@@ -680,6 +836,7 @@ export class AnalysisService {
         if (!STYLING_OPTIONS.includes(stylingFramework)) {
             stylingFramework = 'plain-css';
         }
+        stylingFramework = this._coerceStylingFramework(framework, stylingFramework);
 
         return {
             projectType,
@@ -693,6 +850,7 @@ export class AnalysisService {
             colorScheme: result.colorScheme || '',
             layout: result.layout || '',
             description: result.description || `A ${projectType} built with ${framework}`,
+            designIntent: this._normalizeDesignIntent(result.designIntent, projectType),
             isFallback: false,
             usedFallback: false
         };
@@ -701,7 +859,7 @@ export class AnalysisService {
     _getPlanFallback(requirements) {
         const framework = requirements.framework || config.defaultFramework;
         const complexity = requirements.complexity || 'simple';
-        const stylingFramework = requirements.stylingFramework || 'plain-css';
+        const stylingFramework = this._coerceStylingFramework(framework, requirements.stylingFramework || 'plain-css');
 
         // Get framework-specific structure
         const structures = FRAMEWORK_FILE_STRUCTURES[framework] || FRAMEWORK_FILE_STRUCTURES[config.defaultFramework];
@@ -723,7 +881,7 @@ export class AnalysisService {
         return {
             files,
             techStack,
-            designSystem: { primaryColor: '#4f46e5', fontFamily: 'Inter' },
+            designSystem: this._defaultDesignSystem(requirements.projectType),
             isFallback: true,
             usedFallback: true,
             warning: 'Could not parse AI response; using default file list.'
@@ -732,7 +890,7 @@ export class AnalysisService {
 
     _normalizePlan(result, requirements) {
         const framework = requirements.framework || config.defaultFramework;
-        const stylingFramework = requirements.stylingFramework || 'plain-css';
+        const stylingFramework = this._coerceStylingFramework(framework, requirements.stylingFramework || 'plain-css');
 
         let files = result.files.map(f =>
             typeof f === 'string'
@@ -759,7 +917,7 @@ export class AnalysisService {
         return {
             files,
             techStack: result.techStack || this._buildTechStack(framework, stylingFramework),
-            designSystem: result.designSystem || { primaryColor: '#4f46e5', fontFamily: 'Inter' },
+            designSystem: this._normalizeDesignSystem(result.designSystem, requirements.projectType),
             isFallback: false,
             usedFallback: false
         };

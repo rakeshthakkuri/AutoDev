@@ -1,4 +1,3 @@
-import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import config from '../config.js';
@@ -8,17 +7,90 @@ import { CodeValidator } from './validator.js';
 import { RetryHandler } from './retry.js';
 import { AgentFixer } from './agentFixer.js';
 import { getTemplate } from './templates.js';
-import { runGenerationGraph } from '../agents/graph.js';
+import { runGenerationGraphV2 } from '../agents/orchestrator/graph.js';
+import { bundleProject } from './bundler.js';
 
 const { maxTotalTimeout: MAX_GENERATION_TIMEOUT_MS, maxFileTimeout } = config.generation;
-const POST_REVIEW_TIMEOUT_MS = 90 * 1000; // 1.5 min for post-review (used inside single-file flow)
+
+async function collectProjectFiles(storage, projectId) {
+    const rels = await storage.listFiles(projectId);
+    const out = {};
+    for (const rel of rels) {
+        out[rel] = await storage.readFile(projectId, rel);
+    }
+    return out;
+}
+
+async function probeBundleSuccess(storage, projectId) {
+    try {
+        const files = await collectProjectFiles(storage, projectId);
+        if (Object.keys(files).length === 0) return false;
+        bundleProject(files);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Build payload for metrics route `recordGeneration` (duration in ms).
+ */
+async function buildMetricsRecord({
+    generationId,
+    userPrompt,
+    framework,
+    planFileCount,
+    result,
+    storage,
+    projectId,
+    durationMs,
+}) {
+    const fg = result.filesGenerated ?? 0;
+    const quality = result.quality
+        || (result.success ? 'full' : result.partialSuccess ? 'partial' : 'failed');
+    const llmCalls = result.metrics?.llmCalls ?? 0;
+    const filesFailed = result.metrics?.filesFailed ?? 0;
+    const filesClean = Math.max(0, fg - filesFailed);
+
+    const shouldProbeBundle = result.success || result.partialSuccess;
+    const bundleSuccess = shouldProbeBundle ? await probeBundleSuccess(storage, projectId) : false;
+
+    const vr = result.metrics?.validationResult;
+    const initialImp = vr?.initialIssues ?? 0;
+    const remainingImp = vr?.remainingIssues ?? 0;
+
+    return {
+        generationId,
+        agentVersion: 'v2',
+        prompt: userPrompt,
+        framework: framework || config.defaultFramework,
+        quality,
+        duration: durationMs,
+        fileCount: planFileCount,
+        filesClean,
+        filesFailed,
+        llmCalls,
+        bundleSuccess,
+        errors: [],
+        validationErrors: initialImp,
+        remainingErrors: remainingImp,
+        missingPackages: vr?.missingPackages?.length ?? 0,
+        repairPassesNeeded: initialImp > 0 ? 1 : 0,
+        fullyValidated: remainingImp === 0,
+    };
+}
 
 /**
  * Service for project generation orchestration with streaming
  */
 export class ProjectGenerationService {
-    constructor(generatedDir) {
+    /**
+     * @param {string} generatedDir - Legacy base path (used when storage not injected; prefer storage)
+     * @param {import('./storage/StorageService.js').StorageService} [storage]
+     */
+    constructor(generatedDir, storage = null) {
         this.generatedDir = generatedDir;
+        this.storage = storage;
         this.validator = new CodeValidator();
         this.retryHandler = new RetryHandler();
         this.agentFixer = new AgentFixer(this.validator);
@@ -32,41 +104,69 @@ export class ProjectGenerationService {
         const startTime = Date.now();
         const generationId = passedGenerationId || crypto.randomUUID();
         const projectId = `project_${crypto.randomUUID().split('-')[0]}`;
-        const projectDir = path.join(this.generatedDir, projectId);
 
         try {
-            if (!fs.existsSync(projectDir)) {
-                fs.mkdirSync(projectDir, { recursive: true });
+            if (!this.storage) {
+                throw new Error('ProjectGenerationService requires a StorageService instance');
             }
+
+            await this.storage.ensureProject(projectId);
+            const projectDir = this.storage.getProjectDir(projectId);
 
             const files = plan?.files || [];
             if (!Array.isArray(files) || files.length === 0) {
                 throw new Error('No files in plan. Please try generating again or use a different prompt.');
             }
 
-            logger.info('Generation started', { generationId, projectId, fileCount: files.length });
-
-            const result = await runGenerationGraph(this, {
+            const effectiveRequirements = this._sanitizeRequirements(requirements || {});
+            logger.info('Generation started', {
                 generationId,
-                userPrompt,
-                requirements,
-                plan,
-                projectDir,
-                callbacks: {
-                    onProgress,
-                    onFileGenerated,
-                    onFileChunk,
-                    onError,
-                    onPlan,
-                    onFileFixing,
-                    onFileFixed,
-                },
+                projectId,
+                fileCount: files.length,
+                framework: effectiveRequirements.framework,
+                stylingFramework: effectiveRequirements.stylingFramework
             });
 
-            const duration = (Date.now() - startTime) / 1000;
-            if (!result.success && result.error) {
-                const err = new Error(result.error);
+            const callbacks = {
+                onProgress,
+                onFileGenerated,
+                onFileChunk,
+                onError,
+                onPlan,
+                onFileFixing,
+                onFileFixed,
+            };
+
+            logger.info('Using v2 multi-agent pipeline', { generationId });
+
+            const result = await runGenerationGraphV2(
+                {
+                    analysisService: this._analysisService,
+                    generationService: this,
+                    validator: this.validator,
+                    agentFixer: this.agentFixer,
+                },
+                { generationId, userPrompt, requirements: effectiveRequirements, plan, projectDir, callbacks }
+            );
+
+            const durationMs = Date.now() - startTime;
+            const duration = durationMs / 1000;
+
+            const metricsRecord = await buildMetricsRecord({
+                generationId,
+                userPrompt,
+                framework: effectiveRequirements.framework,
+                planFileCount: files.length,
+                result,
+                storage: this.storage,
+                projectId,
+                durationMs,
+            });
+
+            if (!result.success) {
+                const err = new Error(result.error || 'Generation completed with issues');
                 err.generationResult = result;
+                err.metricsRecord = metricsRecord;
                 throw err;
             }
 
@@ -79,17 +179,21 @@ export class ProjectGenerationService {
                 downloadUrl: `/download/${projectId}`,
                 duration,
                 filesGenerated: result.filesGenerated ?? files.length,
+                metricsRecord,
             };
         } catch (error) {
             logger.error(`Project generation failed: ${error.message}`);
-            throw new Error(`Project generation failed: ${error.message}`);
+            const wrapped = new Error(`Project generation failed: ${error.message}`);
+            if (error.generationResult) wrapped.generationResult = error.generationResult;
+            if (error.metricsRecord) wrapped.metricsRecord = error.metricsRecord;
+            throw wrapped;
         }
     }
 
     /**
      * Generate a single file (with streaming, retry, validation)
      */
-    async _generateSingleFile({ fileInfo, userPrompt, requirements, plan, projectDir, generatedFiles, totalFiles, filesCompleted, onProgress, onFileGenerated, onFileChunk, onError, onFileFixing, onFileFixed }) {
+    async _generateSingleFile({ fileInfo, userPrompt, requirements, plan, projectDir, generatedFiles, totalFiles, filesCompleted, onProgress, onFileGenerated, onFileChunk, onError, onFileFixing, onFileFixed, _contextBuilder, _tokenBudget, _promptOverride }) {
         const filePath = typeof fileInfo === 'string' ? fileInfo : fileInfo.path;
 
         if (!this._isValidFilePath(filePath)) {
@@ -112,7 +216,8 @@ export class ProjectGenerationService {
                 projectDir,
                 generatedFiles,
                 onFileChunk,
-                planFiles: plan?.files || []
+                planFiles: plan?.files || [],
+                _promptOverride,
             });
 
             let finalCode = result.code;
@@ -140,7 +245,7 @@ export class ProjectGenerationService {
                 finalValidation = fixResult.validation;
 
                 // Write the fixed version to disk
-                this._writeFile(projectDir, filePath, finalCode);
+                await this._writeFile(projectDir, filePath, finalCode);
 
                 if (fixResult.fixed) {
                     logger.info(`Agent fix succeeded for ${filePath} in ${fixResult.attempts} attempt(s)`);
@@ -155,6 +260,52 @@ export class ProjectGenerationService {
                         }
                     });
                 }
+            }
+
+            let forcedFallback = false;
+            let forcedFallbackReason = '';
+
+            // Hard safety net for ALL file types:
+            // 1) If still invalid after repair, run one strict full-file recovery generation.
+            // 2) If still invalid, force deterministic template fallback.
+            if (!finalValidation.isValid) {
+                logger.warn(`File ${filePath} still invalid after fixes; attempting strict recovery generation`);
+                const recoveryResult = await this._generateFile({
+                    filePath,
+                    userPrompt: `${userPrompt}\n\nRECOVERY MODE: Previous output for ${filePath} was invalid/truncated. Return a complete, valid file only with balanced syntax and no partial blocks.`,
+                    requirements,
+                    projectDir,
+                    generatedFiles,
+                    onFileChunk,
+                    planFiles: plan?.files || []
+                });
+                finalCode = recoveryResult.code;
+                finalValidation = recoveryResult.validation;
+            }
+
+            if (!finalValidation.isValid) {
+                logger.warn(`File ${filePath} still invalid after recovery; forcing template fallback`);
+                const framework = requirements.framework || config.defaultFramework;
+                const safeCode = getTemplate(filePath, {
+                    projectType: requirements.projectType,
+                    framework,
+                    stylingFramework: requirements.stylingFramework,
+                    title: 'My Website',
+                    description: userPrompt.substring(0, 200)
+                });
+
+                const safeValidation = this.validator.validateFile(safeCode, filePath, framework);
+                finalCode = safeValidation.fixedCode || safeCode;
+                finalValidation = {
+                    ...safeValidation,
+                    warnings: [
+                        ...(safeValidation.warnings || []),
+                        'Generation output was invalid after repair/recovery; template fallback used'
+                    ]
+                };
+                await this._writeFile(projectDir, filePath, finalCode);
+                forcedFallback = true;
+                forcedFallbackReason = 'Invalid after repair and recovery; template fallback used';
             }
 
             // Track for inter-file context
@@ -174,6 +325,10 @@ export class ProjectGenerationService {
                 filePayload.fallback = true;
                 filePayload.fallbackReason = result.fallbackReason;
             }
+            if (forcedFallback) {
+                filePayload.fallback = true;
+                filePayload.fallbackReason = forcedFallbackReason;
+            }
             onFileGenerated?.(filePayload);
         } catch (error) {
             logger.error(`Error generating ${filePath}: ${error.message}`);
@@ -189,7 +344,7 @@ export class ProjectGenerationService {
                     description: userPrompt.substring(0, 200)
                 });
 
-                this._writeFile(projectDir, filePath, fallbackCode);
+                await this._writeFile(projectDir, filePath, fallbackCode);
                 generatedFiles[filePath] = fallbackCode;
 
                 onFileGenerated?.({
@@ -213,8 +368,8 @@ export class ProjectGenerationService {
     /**
      * Generate a single file with streaming
      */
-    async _generateFile({ filePath, userPrompt, requirements, projectDir, generatedFiles, onFileChunk, planFiles }) {
-        const prompt = buildCodeGenPrompt({
+    async _generateFile({ filePath, userPrompt, requirements, projectDir, generatedFiles, onFileChunk, planFiles, _promptOverride }) {
+        const prompt = _promptOverride || buildCodeGenPrompt({
             filePath,
             framework: requirements.framework || config.defaultFramework,
             projectType: requirements.projectType || 'web-app',
@@ -304,7 +459,7 @@ export class ProjectGenerationService {
         }
 
         // Write to disk
-        this._writeFile(projectDir, filePath, code);
+        await this._writeFile(projectDir, filePath, code);
 
         return { code, validation: validationResult, fallback, fallbackReason };
     }
@@ -315,7 +470,7 @@ export class ProjectGenerationService {
     async _postGenerationReview({ generatedFiles, requirements, userPrompt, projectDir, onFileFixed, onFileFixing, onFileGenerated }) {
         try {
             // 1. Sync package.json with actually used libraries
-            this._syncPackageJson(generatedFiles, projectDir, onFileGenerated);
+            await this._syncPackageJson(generatedFiles, projectDir, onFileGenerated);
 
             const framework = requirements.framework || config.defaultFramework;
             const structureResult = this.validator.validateProjectStructure(generatedFiles, framework);
@@ -352,7 +507,7 @@ export class ProjectGenerationService {
                 generatedFiles[filePath] = code;
 
                 // Write to disk
-                this._writeFile(projectDir, filePath, code);
+                await this._writeFile(projectDir, filePath, code);
 
                 // Notify frontend
                 onFileFixed?.({
@@ -388,7 +543,7 @@ export class ProjectGenerationService {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    _syncPackageJson(generatedFiles, projectDir, onFileGenerated) {
+    async _syncPackageJson(generatedFiles, projectDir, onFileGenerated) {
         const pkgPath = 'package.json';
         if (!generatedFiles[pkgPath]) return;
 
@@ -424,7 +579,7 @@ export class ProjectGenerationService {
             if (updated) {
                 const newContent = JSON.stringify(pkg, null, 2);
                 generatedFiles[pkgPath] = newContent;
-                this._writeFile(projectDir, pkgPath, newContent);
+                await this._writeFile(projectDir, pkgPath, newContent);
                 onFileGenerated?.({
                     path: pkgPath,
                     content: newContent,
@@ -521,13 +676,9 @@ export class ProjectGenerationService {
         return cycles;
     }
 
-    _writeFile(projectDir, filePath, code) {
-        const fullPath = path.join(projectDir, filePath);
-        const dirName = path.dirname(fullPath);
-        if (!fs.existsSync(dirName)) {
-            fs.mkdirSync(dirName, { recursive: true });
-        }
-        fs.writeFileSync(fullPath, code);
+    async _writeFile(projectDir, filePath, code) {
+        const projectId = path.basename(projectDir);
+        await this.storage.writeFile(projectId, filePath, code);
     }
 
     /**
@@ -620,6 +771,22 @@ export class ProjectGenerationService {
         const depth = (filePath.match(/\//g) || []).length;
         if (depth > 8) return false;
         return true;
+    }
+
+    _sanitizeRequirements(requirements) {
+        const framework = requirements.framework || config.defaultFramework;
+        let stylingFramework = requirements.stylingFramework || 'plain-css';
+
+        // Vanilla-js has no Tailwind/PostCSS pipeline in generated output.
+        if (framework === config.defaultFramework) {
+            stylingFramework = 'plain-css';
+        }
+
+        return {
+            ...requirements,
+            framework,
+            stylingFramework
+        };
     }
 
     _cleanResponse(response, prompt) {

@@ -90,7 +90,8 @@ export function classifyIssues(issues) {
         i.type === 'SYNTAX_ERROR' ||
         i.type === 'IMPORT_BROKEN' ||
         i.type === 'EXPORT_MISSING' ||
-        i.type === 'TYPE_ERROR'
+        i.type === 'TYPE_ERROR' ||
+        i.type === 'BUNDLE_FAILURE'
     );
 
     const warnings = issues.filter(i =>

@@ -100,6 +100,14 @@ const CDN_PACKAGES = {
     inline: `window.__pkg_classnames=(function(){function c(){return Array.prototype.slice.call(arguments).map(function(a){if(!a)return'';if(typeof a==='string'||typeof a==='number')return String(a);if(Array.isArray(a))return c.apply(null,a);if(typeof a==='object')return Object.keys(a).filter(function(k){return!!a[k];}).join(' ');return'';}).filter(Boolean).join(' ');}return c;})();`,
     global: '__pkg_classnames',
   },
+  // class-variance-authority — minimal cva() for variant Tailwind classes (preview only)
+  'class-variance-authority': {
+    inline:
+      'window.__pkg_cva_lib=(function(){function cx(){var r=[];for(var i=0;i<arguments.length;i++){var a=arguments[i];if(!a)continue;if(typeof a==="string"||typeof a==="number")r.push(String(a));else if(Array.isArray(a))r.push.apply(r,a);else if(typeof a==="object")for(var k in a)if(a[k])r.push(k);}return r.filter(Boolean).join(" ");}function cva(base,config){return function(props){props=props||{};var parts=[base||""];if(!config)return cx.apply(null,parts);var dv=config.defaultVariants||{};if(config.variants){for(var vk in config.variants){var sel=props[vk]!=null?props[vk]:dv[vk];if(sel!=null&&config.variants[vk]&&config.variants[vk][sel]!=null)parts.push(config.variants[vk][sel]);}}if(config.compoundVariants){for(var ci=0;ci<config.compoundVariants.length;ci++){var comp=config.compoundVariants[ci],ok=true;for(var ck in comp){if(ck==="class"||ck==="className")continue;var want=comp[ck],got=props[ck]!=null?props[ck]:dv[ck];if(want!==got){ok=false;break;}}if(ok&&comp.class)parts.push(comp.class);}}return cx.apply(null,parts);};}return{cva:cva,default:cva};})();',
+    global: '__pkg_cva_lib',
+    /** `import cva from 'class-variance-authority'` — bind to the cva export, not the module object */
+    defaultImportFrom: 'cva',
+  },
   // CDN-loaded packages
   lodash:           { url: 'https://cdn.jsdelivr.net/npm/lodash@4/lodash.min.js', global: '_' },
   'lodash-es':      { url: 'https://cdn.jsdelivr.net/npm/lodash@4/lodash.min.js', global: '_' },
@@ -115,7 +123,73 @@ const CDN_PACKAGES = {
   zod:              { url: 'https://cdn.jsdelivr.net/npm/zod@3/lib/index.umd.js', global: 'Zod' },
   immer:            { url: 'https://cdn.jsdelivr.net/npm/immer@10/dist/immer.umd.production.min.js', global: 'immer' },
   zustand:          { url: 'https://cdn.jsdelivr.net/npm/zustand@4/dist/umd/index.development.js', global: 'zustand' },
+
+  // Next.js (preview shims — full subpath keys; see resolveCdnInfo)
+  'next/image': {
+    inline:
+      "window.__pkg_next_image=(function(){var R=window.React;function Image(p){p=p||{};return R.createElement('img',{src:p.src||'',alt:p.alt||'',width:p.width,height:p.height,className:p.className,style:p.style,loading:p.priority?'eager':'lazy',sizes:p.sizes,fill:p.fill,decoding:'async'});}return{Image:Image,default:Image};})();",
+    global: '__pkg_next_image',
+    defaultImportFrom: 'Image',
+  },
+  'next/link': {
+    inline:
+      "window.__pkg_next_link=(function(){var R=window.React;function Link(p){p=p||{};return R.createElement('a',{href:p.href||'#',className:p.className,target:p.target,rel:p.target==='_blank'?p.rel||'noopener noreferrer':p.rel,onClick:p.onClick},p.children);}return{Link:Link,default:Link};})();",
+    global: '__pkg_next_link',
+    defaultImportFrom: 'Link',
+  },
+  'next/navigation': {
+    inline:
+      "window.__pkg_next_nav=(function(){function useRouter(){return{push:function(){},replace:function(){},prefetch:function(){},back:function(){},forward:function(){},refresh:function(){},pathname:'/',query:{}};}function usePathname(){return '/';}function useSearchParams(){return new URLSearchParams();}function useParams(){return{};}function redirect(){throw new Error('[preview] redirect()');}function notFound(){throw new Error('[preview] notFound()');}return{useRouter:useRouter,usePathname:usePathname,useSearchParams:useSearchParams,useParams:useParams,redirect:redirect,notFound:notFound};})();",
+    global: '__pkg_next_nav',
+  },
+  'next/router': {
+    inline:
+      "window.__pkg_next_router=(function(){function useRouter(){return{pathname:'/',route:'/',query:{},asPath:'/',push:function(){},replace:function(){},prefetch:function(){}};}return{useRouter:useRouter};})();",
+    global: '__pkg_next_router',
+  },
+  'next/head': {
+    inline:
+      "window.__pkg_next_head=(function(){var R=window.React;function Head(){return null;}return{Head:Head,default:Head};})();",
+    global: '__pkg_next_head',
+    defaultImportFrom: 'Head',
+  },
+  'next/font/google': {
+    inline:
+      "window.__pkg_next_font=(function(){function stub(){return{className:'',style:{}};}return new Proxy({},{get:function(){return stub;}});})();",
+    global: '__pkg_next_font',
+  },
+  'next/font/local': {
+    inline:
+      "window.__pkg_next_font=(function(){function stub(){return{className:'',style:{}};}return new Proxy({},{get:function(){return stub;}});})();",
+    global: '__pkg_next_font',
+  },
 };
+
+// Unicode hyphen/dash characters sometimes appear in LLM-generated imports and break
+// string equality against CDN_PACKAGES keys (e.g. "class‑variance‑authority" U+2011).
+const UNICODE_HYPHENS = /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]/g;
+
+function normalizeExternalPackageSpecifier(spec) {
+  if (!spec || typeof spec !== 'string') return '';
+  return spec.trim().normalize('NFKC').replace(UNICODE_HYPHENS, '-');
+}
+
+/** npm package root: "lodash/map" → "lodash", "@scope/pkg/sub" → "@scope/pkg" */
+function rootPackageName(spec) {
+  const n = normalizeExternalPackageSpecifier(spec);
+  if (!n) return '';
+  const parts = n.split('/');
+  if (parts[0].startsWith('@') && parts.length >= 2) {
+    return `${parts[0]}/${parts[1]}`;
+  }
+  return parts[0];
+}
+
+function resolveCdnInfo(spec) {
+  const n = normalizeExternalPackageSpecifier((spec || '').trim());
+  if (!n) return undefined;
+  return CDN_PACKAGES[n] ?? CDN_PACKAGES[rootPackageName(n)];
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -141,6 +215,25 @@ function injectTailwind(html) {
     return html.replace('</head>', `  ${TAILWIND_CDN}\n</head>`);
   }
   return `${TAILWIND_CDN}\n${html}`;
+}
+
+/**
+ * Collect Babel transform errors for every JSX/TSX file (preview parity dry-run).
+ * @param {Record<string, string>} files
+ * @returns {Array<{ path: string, errors: string[] }>}
+ */
+export function collectBundlerTransformErrors(files) {
+  const out = [];
+  if (!files || typeof files !== 'object') return out;
+  for (const [p, content] of Object.entries(files)) {
+    if (typeof content !== 'string') continue;
+    if (!p.endsWith('.jsx') && !p.endsWith('.tsx')) continue;
+    const result = transformJSX(content, p);
+    if (result.errors?.length) {
+      out.push({ path: p, errors: [...result.errors] });
+    }
+  }
+  return out;
 }
 
 function transformJSX(code, filename) {
@@ -255,8 +348,12 @@ function detectExternalPackages(files) {
     let m;
     re.lastIndex = 0;
     while ((m = re.exec(content)) !== null) {
-      const root = m[1].split('/')[0]; // 'lodash/debounce' → 'lodash'
-      if (root !== 'react' && root !== 'react-dom') needed.add(root);
+      const spec = normalizeExternalPackageSpecifier(m[1]);
+      const root = rootPackageName(spec);
+      if (root === 'react' || root === 'react-dom') continue;
+      // Prefer full specifier (e.g. 'next/image') so subpath shims load
+      if (CDN_PACKAGES[spec]) needed.add(spec);
+      if (CDN_PACKAGES[root]) needed.add(root);
     }
   }
   return needed;
@@ -440,12 +537,16 @@ export function bundleReactProject(files) {
           return `const ${ident} = ${safeComponentRef(ident)};`;
         }
         // External npm package (default import)
-        const rootPkg = rawPath.split('/')[0];
-        const cdnInfo = CDN_PACKAGES[rootPkg];
+        const cdnInfo = resolveCdnInfo(rawPath);
         if (cdnInfo) {
+          const g = cdnInfo.global;
+          if (cdnInfo.defaultImportFrom) {
+            const di = cdnInfo.defaultImportFrom;
+            return `const ${ident} = (typeof ${g} !== 'undefined' && ${g} != null && ${g}['${di}'] !== undefined) ? ${g}['${di}'] : function ${ident}(){ console.warn('[preview] CDN failed for "${rawPath}"'); return null; };`;
+          }
           // CDN global when loaded (may be object or function — valid either way).
           // Stub is a no-op function so <Pkg /> doesn't crash if CDN fails.
-          return `const ${ident} = (typeof ${cdnInfo.global} !== 'undefined') ? ${cdnInfo.global} : function ${ident}(){ console.warn('[preview] CDN failed for "${rawPath}"'); return null; };`;
+          return `const ${ident} = (typeof ${g} !== 'undefined') ? ${g} : function ${ident}(){ console.warn('[preview] CDN failed for "${rawPath}"'); return null; };`;
         }
         // Unknown external package — function stub so it can be used as JSX without crashing
         return `function ${ident}(){ console.warn('[preview] "${rawPath}" is not available in preview'); return null; } /* ${rawPath} */`;
@@ -478,7 +579,7 @@ export function bundleReactProject(files) {
     processedCode = processedCode.replace(
       /import\s+\{([^}]+)\}\s+from\s+['"]([^'"./][^'"]*)['"]\s*;?/g,
       (_, namedImports, pkg) => {
-        const rootPkg = pkg.split('/')[0];
+        const rootPkg = rootPackageName(pkg);
         // React/ReactDOM named imports are already destructured at the top of the script
         if (rootPkg === 'react' || rootPkg === 'react-dom') {
           return '// React/ReactDOM named imports available as globals\n';
@@ -491,7 +592,7 @@ export function bundleReactProject(files) {
           })
           .filter(i => i.original && i.alias);
 
-        const cdnInfo = CDN_PACKAGES[rootPkg];
+        const cdnInfo = resolveCdnInfo(pkg);
         if (cdnInfo) {
           return imports
             .map(({ original, alias }) =>
@@ -510,11 +611,20 @@ export function bundleReactProject(files) {
 
     // ── Step 3: Namespace imports from external packages ──────────────────────
     // Handles: import * as uuid from 'uuid'  /  import * as Icons from 'lucide-react'
+    // Shadcn/Radix often use `import * as React from 'react'` — must map to the UMD
+    // global, not `{}`, or React.forwardRef and friends break inside the file IIFE.
     processedCode = processedCode.replace(
       /import\s+\*\s+as\s+(\w+)\s+from\s+['"]([^'"./][^'"]*)['"]\s*;?/g,
       (_, alias, pkg) => {
-        const rootPkg = pkg.split('/')[0];
-        const cdnInfo = CDN_PACKAGES[rootPkg];
+        const rootPkg = rootPackageName(pkg);
+        if (rootPkg === 'react') {
+          // Use window.* only — if alias is `React`, referencing React on the RHS would TDZ.
+          return `const ${alias} = window.React;`;
+        }
+        if (rootPkg === 'react-dom') {
+          return `const ${alias} = window.ReactDOM;`;
+        }
+        const cdnInfo = resolveCdnInfo(pkg);
         if (cdnInfo) {
           return `const ${alias} = (typeof ${cdnInfo.global} !== 'undefined') ? ${cdnInfo.global} : {};`;
         }
@@ -527,7 +637,7 @@ export function bundleReactProject(files) {
     processedCode = processedCode.replace(
       /import\s+(\w+)\s*,\s*\{([^}]+)\}\s+from\s+['"]([^'"./][^'"]*)['"]\s*;?/g,
       (_, defaultIdent, namedImports, pkg) => {
-        const rootPkg = pkg.split('/')[0];
+        const rootPkg = rootPackageName(pkg);
         if (rootPkg === 'react' || rootPkg === 'react-dom') {
           return '// React/ReactDOM combined import — available as globals\n';
         }
@@ -539,9 +649,11 @@ export function bundleReactProject(files) {
           })
           .filter(i => i.original && i.alias);
 
-        const cdnInfo = CDN_PACKAGES[rootPkg];
+        const cdnInfo = resolveCdnInfo(pkg);
         const defaultLine = cdnInfo
-          ? `const ${defaultIdent} = (typeof ${cdnInfo.global} !== 'undefined') ? ${cdnInfo.global} : function ${defaultIdent}(){ return null; };`
+          ? cdnInfo.defaultImportFrom
+            ? `const ${defaultIdent} = (typeof ${cdnInfo.global} !== 'undefined' && ${cdnInfo.global} != null && ${cdnInfo.global}['${cdnInfo.defaultImportFrom}'] !== undefined) ? ${cdnInfo.global}['${cdnInfo.defaultImportFrom}'] : function ${defaultIdent}(){ return null; };`
+            : `const ${defaultIdent} = (typeof ${cdnInfo.global} !== 'undefined') ? ${cdnInfo.global} : function ${defaultIdent}(){ return null; };`
           : `function ${defaultIdent}(){ console.warn('[preview] "${pkg}" not available'); return null; }`;
         const namedLines = imports
           .map(({ original, alias }) =>
@@ -968,7 +1080,6 @@ export function bundleServerFramework(files, type) {
         if (path.endsWith('.tsx') || path.endsWith('.jsx')) {
           const converted = content
             .replace(/['"]use client['"];?\s*/g, '')
-            .replace(/import.*from\s+['"]next\/.*['"];?\s*/g, '')
             .replace(/export\s+const\s+metadata[\s\S]*?;\s*/g, '');
           reactFiles[path] = converted;
         } else {

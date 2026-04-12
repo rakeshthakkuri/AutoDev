@@ -1,5 +1,6 @@
 import logger from '../../services/logger.js';
 import { createError, classifyIssues, attributeRootCauses } from '../shared/errors.js';
+import { collectBundlerTransformErrors } from '../../services/bundler.js';
 
 /**
  * Reviewer Agent — validates project-level consistency with multiple passes.
@@ -36,6 +37,10 @@ export class ReviewerAgent {
         // Pass 3: File-level validation
         const validationIssues = await this._validateFiles(memory, framework);
         allIssues.push(...validationIssues);
+
+        // Pass 4: Preview bundler dry-run (JSX/TSX Babel transform — same as Live Preview)
+        const bundleIssues = this._bundlerDryRunIssues(memory, framework);
+        allIssues.push(...bundleIssues);
 
         // Classify issues
         const classified = classifyIssues(allIssues);
@@ -335,6 +340,30 @@ export class ReviewerAgent {
             }
         }
 
+        return issues;
+    }
+
+    /**
+     * Pass 4: Same Babel transform as Live Preview; catches errors per-file validation may miss.
+     */
+    _bundlerDryRunIssues(memory, framework) {
+        const issues = [];
+        if (!memory) return issues;
+        const fw = framework || 'react';
+        if (!['react', 'react-ts'].includes(fw)) return issues;
+
+        const files = memory.getGeneratedFiles();
+        const bundleErrors = collectBundlerTransformErrors(files);
+        for (const { path: filePath, errors } of bundleErrors) {
+            for (const msg of errors) {
+                issues.push(createError('BUNDLE_FAILURE', {
+                    phase: 'review',
+                    agent: 'reviewer',
+                    file: filePath,
+                    message: typeof msg === 'string' ? msg : String(msg),
+                }));
+            }
+        }
         return issues;
     }
 }

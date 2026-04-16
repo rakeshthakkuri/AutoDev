@@ -2,6 +2,7 @@ import logger from '../../services/logger.js';
 import { ContextBuilder, calculateTokenBudget } from './context.js';
 import { createError } from '../shared/errors.js';
 import { CODEGEN_PROMPT_V2 } from './prompts.js';
+import config from '../../config.js';
 
 /**
  * Coder Agent — generates individual files with dependency-aware context.
@@ -13,7 +14,7 @@ export class CoderAgent {
      */
     constructor(services) {
         this.generationService = services.generationService;
-        this.useV2 = process.env.AGENT_VERSION === 'v2';
+        this.useV2 = config.agentVersion === 'v2';
     }
 
     /**
@@ -249,14 +250,17 @@ const FRAMEWORK_RULES_V2 = {
 - Use React.FC<Props> or typed function signatures.
 - Typed hooks: useState<Type>, useRef<HTMLElement | null>.
 - Every component file MUST export default a typed function component.
-- Import children with relative paths.
+- Use ONLY relative import paths (e.g., './components/Header') — NEVER use @/ path aliases.
 - For tsconfig.json: strict mode, jsx: "react-jsx".`,
 
     'nextjs': `
 - App Router (app/ directory), NOT pages/ router.
-- Server Components by default; add 'use client' ONLY when hooks/interactivity needed.
-- layout.tsx: export metadata, use children prop, include <html> and <body> tags.
-- Use Next.js Image component for optimized images where applicable.
+- Add 'use client' at the top of EVERY component file that uses hooks, state, or event handlers.
+- NEVER export metadata objects — do NOT write "export const metadata" anywhere.
+- NEVER use async function components — all components must be regular synchronous functions.
+- NEVER use the Next.js Image component (<Image />) — use plain <img> tags instead.
+- NEVER use server-only imports: next/headers, next/cache, server-only, next/server.
+- Use ONLY relative import paths (e.g., './components/Header') — NEVER use @/ path aliases.
 - API routes: app/api/route.ts with named exports (GET, POST).
 - TypeScript throughout with proper interfaces.`,
 

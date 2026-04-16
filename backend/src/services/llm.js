@@ -191,7 +191,7 @@ CORE RULES:
 - Use proper hooks typing: useState<Type>, useRef<HTMLElement>.
 - Icons/Images: Use high-quality assets (SVGs, Unsplash).
 - Export components as default exports.
-- For App.tsx: Import child components using relative paths.
+- Use ONLY relative import paths (e.g., './components/Header') — NEVER use @/ path aliases.
 - For tsconfig.json: Include strict mode, jsx: react-jsx.
 - Make it visually polished with real content.`,
 
@@ -206,9 +206,12 @@ MANDATORY OUTPUT FORMAT:
 
 CORE RULES:
 - Use the App Router (app/ directory), NOT pages/ router.
-- Server Components by default; add 'use client' ONLY if hooks/interactivity are needed.
-- For layout.tsx: Export metadata, use children prop, include html/body tags.
-- Use Next.js Image component (<Image />) for optimized images where possible.
+- Add 'use client' at the top of EVERY component file that uses hooks, state, or event handlers.
+- NEVER export metadata objects — do NOT write "export const metadata" anywhere.
+- NEVER use async function components — all components must be regular synchronous functions.
+- NEVER use the Next.js Image component (<Image />) — use plain <img> tags instead.
+- NEVER use server-only imports: next/headers, next/cache, server-only, next/server.
+- Use ONLY relative import paths (e.g., './components/Header') — NEVER use @/ path aliases.
 - For API routes: Use app/api/route.ts with named exports (GET, POST).
 - Use TypeScript throughout with proper interfaces.
 - For tailwind: Use utility classes extensively.

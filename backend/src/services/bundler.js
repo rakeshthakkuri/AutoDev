@@ -290,11 +290,39 @@ function transformJSX(code, filename) {
   }
 }
 
+// Collapse `a/b/../c` → `a/c` so cross-directory relative imports always resolve,
+// even when the entry file was renamed (e.g. app/page.tsx → src/App.tsx).
+function normalizePath(p) {
+  const parts = p.split('/');
+  const out = [];
+  for (const seg of parts) {
+    if (seg === '..') { if (out.length) out.pop(); }
+    else if (seg !== '.') out.push(seg);
+  }
+  return out.join('/');
+}
+
+// Resolve a TypeScript `@/` path alias to a real file key.
+// `@` conventionally maps to the project root in Next.js / TypeScript projects.
+function resolveAtAlias(aliasedPath, fileKeys) {
+  const base = aliasedPath;
+  const candidates = [base, base + '.jsx', base + '.tsx', base + '.js', base + '.ts'];
+  for (const c of candidates) {
+    const m = fileKeys.find(k => k === c || k.startsWith(c + '.'));
+    if (m) return m;
+    // Also match /index.* files
+    const idx = fileKeys.find(k => k.replace(/\/index\.(jsx|tsx|js|ts)$/, '') === c);
+    if (idx) return idx;
+  }
+  return null;
+}
+
 function resolveComponentPath(importPath, fromPath, fileKeys) {
   const clean = importPath.replace(/^['"]|['"]\s*;?\s*$/g, '').trim();
   if (clean.startsWith('.') === false) return null;
   const dir = fromPath.includes('/') ? fromPath.replace(/\/[^/]+$/, '') : '';
-  const base = dir ? `${dir}/${clean.replace(/^\.\//, '')}` : clean.replace(/^\.\//, '');
+  const rawBase = dir ? `${dir}/${clean.replace(/^\.\//, '')}` : clean.replace(/^\.\//, '');
+  const base = normalizePath(rawBase); // normalize a/b/../c → a/c
   const candidates = [base, base + '.jsx', base + '.tsx', base + '.js', base + '.ts'];
   for (const c of candidates) {
     const exact = fileKeys.find(k => k === c || k.replace(/\/index\.(jsx|tsx|js|ts)$/, '') === c.replace(/\/index$/, ''));
@@ -310,7 +338,8 @@ function getComponentNameFromCode(code, path) {
   if (defaultExportMatch) return defaultExportMatch[1];
   const defaultRefMatch = code.match(/export\s+default\s+(\w+)\s*;?/);
   if (defaultRefMatch) return defaultRefMatch[1];
-  const funcMatch = code.match(/(?:function|const|var|let)\s+(\w+)\s*[=(]/);
+  // Include class so `class MyComponent extends ...` is detected
+  const funcMatch = code.match(/(?:function|const|var|let|class)\s+(\w+)\s*[=({\s]/);
   if (funcMatch) return funcMatch[1];
   const base = path.replace(/.*\//, '').replace(/\.(jsx|tsx|js|ts)$/, '') || 'Component';
   return base === 'index' ? 'Component' : base;
@@ -465,6 +494,14 @@ export function bundleReactProject(files) {
       } else {
         transformedFiles[path] = result.code;
       }
+    } else if (path.endsWith('.ts') && !path.endsWith('.d.ts')) {
+      // Compile TypeScript utility files (hooks, stores, helpers) so their exports
+      // land in the component registry and relative imports resolve correctly.
+      // Silently skip on error — type-only files compile to nothing and that's fine.
+      const result = transformJSX(content, path);
+      if (!result.errors.length && result.code.trim()) {
+        transformedFiles[path] = result.code;
+      }
     } else if (path.endsWith('.css') || path.endsWith('.scss')) {
       const cleaned = content.replace(/@tailwind\s+\w+;\s*/g, '');
       if (cleaned.trim()) cssFiles.push(`/* ${path} */\n${cleaned}`);
@@ -536,6 +573,15 @@ export function bundleReactProject(files) {
         if (rawPath.startsWith('.') || rawPath.startsWith('/')) {
           return `const ${ident} = ${safeComponentRef(ident)};`;
         }
+        // TypeScript @/ path alias (project root) — e.g. import X from '@/hooks/useTodos'
+        if (rawPath.startsWith('@/')) {
+          const atResolved = resolveAtAlias(rawPath.slice(2), fileKeys);
+          if (atResolved) {
+            const targetName = componentNameByPath[atResolved] ?? ident;
+            return `const ${ident} = ${safeComponentRef(targetName)};`;
+          }
+          return `const ${ident} = ${safeComponentRef(ident)};`;
+        }
         // External npm package (default import)
         const cdnInfo = resolveCdnInfo(rawPath);
         if (cdnInfo) {
@@ -575,7 +621,8 @@ export function bundleReactProject(files) {
 
     // ── Step 2: Named imports from external packages ───────────────────────────
     // Handles: import { v4 as uuidv4, v1 } from 'uuid'
-    // Only matches paths that don't start with . or / (i.e. npm packages)
+    // Only matches paths that don't start with . or / (i.e. npm packages).
+    // Also intercepts TypeScript @/ path aliases before they hit the CDN lookup.
     processedCode = processedCode.replace(
       /import\s+\{([^}]+)\}\s+from\s+['"]([^'"./][^'"]*)['"]\s*;?/g,
       (_, namedImports, pkg) => {
@@ -591,6 +638,20 @@ export function bundleReactProject(files) {
             return { original: parts[0].trim(), alias: (parts[1] || parts[0]).trim() };
           })
           .filter(i => i.original && i.alias);
+
+        // TypeScript @/ path alias — resolve against project root before CDN lookup
+        if (pkg.startsWith('@/')) {
+          const atResolved = resolveAtAlias(pkg.slice(2), fileKeys);
+          if (atResolved) {
+            return imports
+              .map(({ original, alias }) => `const ${alias} = ${safeComponentRef(original)};`)
+              .join('\n');
+          }
+          // @/ path not in bundle — return safe stubs (not crash-inducing)
+          return imports
+            .map(({ alias }) => `const ${alias} = ${safeComponentRef(alias)};`)
+            .join('\n');
+        }
 
         const cdnInfo = resolveCdnInfo(pkg);
         if (cdnInfo) {
@@ -623,6 +684,13 @@ export function bundleReactProject(files) {
         }
         if (rootPkg === 'react-dom') {
           return `const ${alias} = window.ReactDOM;`;
+        }
+        if (pkg.startsWith('@/')) {
+          const atResolved = resolveAtAlias(pkg.slice(2), fileKeys);
+          const g = atResolved ? (componentNameByPath[atResolved] ?? alias) : null;
+          return g
+            ? `const ${alias} = (typeof window.__Component_${g} !== 'undefined') ? window.__Component_${g} : {};`
+            : `const ${alias} = {};`;
         }
         const cdnInfo = resolveCdnInfo(pkg);
         if (cdnInfo) {
@@ -700,9 +768,11 @@ export function bundleReactProject(files) {
     const registerLines = [...allSymbols]
       .filter(Boolean)
       .map(name =>
-        // Only register functions and React special types (memo, forwardRef, lazy).
-        // Registering plain objects would poison the registry and cause "got: object" crashes.
-        `(function(){ var __v = ${name}; if (__v != null && (typeof __v === 'function' || (typeof __v === 'object' && __v.$$typeof))) { window.__Component_${name} = __v; } })()`
+        // Guard with typeof so undeclared names (filename-fallback edge case) never throw
+        // ReferenceError — typeof is safe for both undeclared vars and TDZ-past declarations.
+        // Only register functions and React special types (memo, forwardRef, lazy);
+        // plain objects would poison the registry and cause "got: object" crashes.
+        `(function(){ if (typeof ${name} !== 'undefined') { var __v = ${name}; if (__v != null && (typeof __v === 'function' || (typeof __v === 'object' && __v.$$typeof))) { window.__Component_${name} = __v; } } })()`
       )
       .join('\n  ');
 
@@ -1072,16 +1142,30 @@ export function bundleServerFramework(files, type) {
 
   if (type === PROJECT_TYPES.NEXTJS) {
     const isApiRoute = (p) => /(?:^|\/)(?:app|pages)\/api\//.test(p) || /\/route\.(ts|tsx|js|jsx)$/.test(p);
+    // Next.js special files that conflict with the React SPA preview environment:
+    // - layout renders <html><body> which collides with the preview's own document structure
+    // - error/loading/not-found/template are framework-managed and don't render standalone
+    const isNextSpecialFile = (p) => /(?:^|\/)(?:layout|error|loading|not-found|template)\.[jt]sx?$/.test(p);
     const pageFile = Object.entries(files).find(([p]) => !isApiRoute(p) && (p.includes('page.tsx') || p.includes('page.jsx')));
     if (pageFile) {
       const reactFiles = {};
       for (const [path, content] of Object.entries(files)) {
         if (isApiRoute(path)) continue;
-        if (path.endsWith('.tsx') || path.endsWith('.jsx')) {
+        if (isNextSpecialFile(path)) continue;
+        if (path.endsWith('.tsx') || path.endsWith('.jsx') || path.endsWith('.ts') || path.endsWith('.js')) {
           const converted = content
             .replace(/['"]use client['"];?\s*/g, '')
-            .replace(/export\s+const\s+metadata[\s\S]*?;\s*/g, '');
-          reactFiles[path] = converted;
+            .replace(/['"]use server['"];?\s*/g, '')
+            // Strip metadata export — may or may not have trailing semicolon
+            .replace(/export\s+const\s+metadata[^=]*=[^;]*?(?:\};?|\}\s*\n)/gs, '')
+            // Strip server-only imports (next/headers, next/cache, server-only, next/server)
+            .replace(/import\s+.*?from\s+['"](?:next\/headers|next\/cache|next\/server|server-only)['"];?\s*/g, '// server-only import removed\n');
+          // Strip async from exported component functions ONLY when file has no await expressions.
+          // If await is present, stripping async would create a SyntaxError in Babel.
+          const hasAwait = /\bawait\s/.test(converted);
+          const finalConverted = hasAwait ? converted :
+            converted.replace(/\basync\s+function\s+([A-Z][a-zA-Z0-9]*)\s*\(/g, 'function $1(');
+          reactFiles[path] = finalConverted;
         } else {
           reactFiles[path] = content;
         }

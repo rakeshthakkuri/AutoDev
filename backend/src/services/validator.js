@@ -716,6 +716,85 @@ export class CodeValidator {
 
     // ─── Auto-Fix Common Errors ─────────────────────────────────────────
 
+    _injectPropDefaults(code) {
+        let fixedCode = code;
+        const fixesApplied = [];
+
+        const hasArrayUsage = (name, body) => {
+            const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return new RegExp(`\\b${escaped}\\s*\\.(?:map|filter|forEach|reduce|find|some|every|flatMap|length)\\b`).test(body);
+        };
+
+        const hasObjectUsage = (name, body) => {
+            const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return new RegExp(`\\b${escaped}(?:\\s*\\?|)\\.`).test(body);
+        };
+
+        const splitProps = (propsText) => {
+            const out = [];
+            let current = '';
+            let depth = 0;
+            for (const ch of propsText) {
+                if (ch === ',' && depth === 0) {
+                    out.push(current);
+                    current = '';
+                    continue;
+                }
+                if (ch === '{' || ch === '[' || ch === '(') depth += 1;
+                if (ch === '}' || ch === ']' || ch === ')') depth = Math.max(0, depth - 1);
+                current += ch;
+            }
+            if (current) out.push(current);
+            return out;
+        };
+
+        const applyToMatch = (match, sigStart, propsText, sigEnd, bodyText) => {
+            const segments = splitProps(propsText);
+            let changed = false;
+
+            const updatedSegments = segments.map((segment) => {
+                const originalSegment = segment;
+                const token = segment.trim();
+                if (!token || token.startsWith('...') || token.includes('=')) return originalSegment;
+
+                const parts = token.split(':');
+                const keyPart = parts[0]?.trim();
+                const valuePart = parts.length > 1 ? parts.slice(1).join(':').trim() : keyPart;
+                if (!valuePart || valuePart.startsWith('{') || valuePart.startsWith('[')) return originalSegment;
+                if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(valuePart)) return originalSegment;
+
+                const addArrayDefault = hasArrayUsage(valuePart, bodyText);
+                const addObjectDefault = !addArrayDefault && hasObjectUsage(valuePart, bodyText);
+                if (!addArrayDefault && !addObjectDefault) return originalSegment;
+
+                const defaultLiteral = addArrayDefault ? '[]' : '{}';
+                const leadingWhitespace = originalSegment.match(/^\s*/)?.[0] || '';
+                const rewritten = parts.length > 1
+                    ? `${leadingWhitespace}${keyPart}: ${valuePart} = ${defaultLiteral}`
+                    : `${leadingWhitespace}${valuePart} = ${defaultLiteral}`;
+
+                fixesApplied.push(`Added safe default for prop "${valuePart}"`);
+                changed = true;
+                return rewritten;
+            });
+
+            if (!changed) return match;
+            return `${sigStart}${updatedSegments.join(',')}${sigEnd}${bodyText}}`;
+        };
+
+        fixedCode = fixedCode
+            .replace(
+                /(function\s+[A-Z][A-Za-z0-9_]*\s*\(\s*\{)([\s\S]*?)(\}\s*(?::\s*[^)]*)?\)\s*\{)([\s\S]*?)\n\}/g,
+                applyToMatch
+            )
+            .replace(
+                /((?:const|let|var)\s+[A-Z][A-Za-z0-9_]*\s*=\s*\(\s*\{)([\s\S]*?)(\}\s*(?::\s*[^)=]+)?\)\s*=>\s*\{)([\s\S]*?)\n\};?/g,
+                applyToMatch
+            );
+
+        return { fixedCode, fixesApplied };
+    }
+
     autoFixCommonErrors(code, fileType, options = {}) {
         const fixes = [];
         let fixed = code;
@@ -735,6 +814,14 @@ export class CodeValidator {
                 fixes.push(`Added ${delta} closing brace(s)`);
             } else if (delta > maxBraceDelta) {
                 // Large mismatch — likely broken AST; padding braces usually makes it worse
+            }
+        }
+
+        if (fileType === 'jsx' || fileType === 'tsx') {
+            const propFix = this._injectPropDefaults(fixed);
+            if (propFix.fixedCode !== fixed && propFix.fixesApplied.length > 0) {
+                fixed = propFix.fixedCode;
+                fixes.push(...propFix.fixesApplied);
             }
         }
 
@@ -827,14 +914,16 @@ export class CodeValidator {
 
             const hadParseError = result.errors.some((e) => typeof e === 'string' && e.startsWith('Parse error (preview parity):'));
             // Auto-fix if failed
-            if (!result.isValid && !result.fixedCode) {
-                const autoFix = this.autoFixCommonErrors(cleanCode, ext.replace('.', ''), {
+            const shouldTryAutoFix = !result.isValid || ext === '.jsx' || ext === '.tsx';
+            if (shouldTryAutoFix) {
+                const sourceForFix = result.fixedCode ?? cleanCode;
+                const autoFix = this.autoFixCommonErrors(sourceForFix, ext.replace('.', ''), {
                     skipBracePadding: hadParseError,
                     maxBraceDelta: 5,
                 });
-                if (autoFix.fixesApplied.length > 0) {
+                if (autoFix.fixesApplied.length > 0 && autoFix.fixedCode !== sourceForFix) {
                     result.fixedCode = autoFix.fixedCode;
-                    result.fixesApplied = autoFix.fixesApplied;
+                    result.fixesApplied = [...(result.fixesApplied || []), ...autoFix.fixesApplied];
                 }
             }
 

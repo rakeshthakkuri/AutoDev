@@ -527,8 +527,21 @@ export function bundleReactProject(files) {
 
   // Emit a runtime expression that looks up the component registry and falls back
   // to a visible placeholder — never returns a bare object.
-  const safeComponentRef = (alias) =>
-    `(function(){ var __v = window.__Component_${alias}; return ${VALID_REACT_TYPE_CHECK} ? __v : function ${alias}(){ return React.createElement('span', { style: { color: '#888', fontSize: '0.75rem', fontFamily: 'monospace' } }, '[${alias}]'); }; })()`;
+  const safeComponentRef = (alias) => {
+    const wrapsAsComponent = /^[A-Z]/.test(alias);
+    return `(function(){
+      var __v = window.__Component_${alias};
+      if (${VALID_REACT_TYPE_CHECK}) {
+        if (${wrapsAsComponent ? 'true' : 'false'}) {
+          return function ${alias}(props) {
+            return React.createElement(ErrorBoundary, null, React.createElement(__v, props || null));
+          };
+        }
+        return __v;
+      }
+      return function ${alias}(){ return React.createElement('span', { style: { color: '#888', fontSize: '0.75rem', fontFamily: 'monospace' } }, '[${alias}]'); };
+    })()`;
+  };
 
   const processFileCode = (path, code) => {
     let processedCode = code;

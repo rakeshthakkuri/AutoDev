@@ -3252,3 +3252,21 @@
 {"level":"info","message":"POST / 200 50784ms","requestId":"f88563a5-9557-4df4-a773-8fbd03b68ca5","timestamp":"2026-04-16T08:34:55.416Z"}
 {"level":"info","message":"POST / 200 1ms","requestId":"dadd33b1-6ce4-488b-84fe-cb4bde5f8190","timestamp":"2026-04-16T08:34:55.424Z"}
 {"level":"info","message":"SIGINT received. Shutting down gracefully...","timestamp":"2026-04-16T08:35:35.729Z"}
+{"level":"info","message":"LLM providers available","providers":["gemini"],"timestamp":"2026-04-16T08:44:38.299Z"}
+{"level":"info","message":"generationStore: using in-memory store","timestamp":"2026-04-16T08:44:38.758Z"}
+{"level":"info","message":"V2 agent pipeline loaded successfully","timestamp":"2026-04-16T08:44:38.788Z"}
+{"level":"info","message":"Backend v2.0 running on port 5001 (development)","timestamp":"2026-04-16T08:44:38.789Z"}
+{"level":"info","message":"Initializing Gemini (Google GenAI) client...","timestamp":"2026-04-16T08:44:38.789Z"}
+{"level":"info","message":"Gemini client initialized successfully","timestamp":"2026-04-16T08:44:38.790Z"}
+{"intervalHours":24,"level":"info","message":"Cleanup scheduler started","timestamp":"2026-04-16T08:44:38.790Z"}
+{"level":"info","message":"POST / 200 3619ms","requestId":"1a8965bd-f18e-4f52-97a2-64e17df80d49","timestamp":"2026-04-16T08:44:54.923Z"}
+{"level":"warn","message":"Plan attempt 1: no valid JSON, retrying in 1000ms","requestId":"b5a2ba0f-2cff-46ee-936b-cedce3153971","timestamp":"2026-04-16T08:45:03.024Z"}
+{"error":"{\"error\":{\"code\":503,\"message\":\"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\"status\":\"UNAVAILABLE\"}}","level":"warn","message":"Provider gemini failed on generateCompletion","requestId":"b5a2ba0f-2cff-46ee-936b-cedce3153971","timestamp":"2026-04-16T08:45:14.437Z"}
+{"level":"warn","message":"Plan error: {\"error\":{\"code\":503,\"message\":\"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\"status\":\"UNAVAILABLE\"}}, using fallback","requestId":"b5a2ba0f-2cff-46ee-936b-cedce3153971","timestamp":"2026-04-16T08:45:14.438Z"}
+{"level":"info","message":"POST / 200 19513ms","requestId":"b5a2ba0f-2cff-46ee-936b-cedce3153971","timestamp":"2026-04-16T08:45:14.440Z"}
+{"complexity":"simple","fileCount":8,"framework":"react-ts","generationId":"2f6c539a-a967-472f-9d5e-05685be49de3","level":"info","message":"NEW GENERATION REQUEST","requestId":"cb75ac8c-c7bf-48ff-a13e-cdd5e2f2d545","styling":"tailwind","timestamp":"2026-04-16T08:45:14.449Z","userPrompt":"Build a modern task manager for remote teams with clean dashboard UX, keyboard shortcuts, smart filt"}
+{"fileCount":8,"framework":"react-ts","generationId":"2f6c539a-a967-472f-9d5e-05685be49de3","level":"info","message":"Generation started","projectId":"project_4dd4bd1a","requestId":"cb75ac8c-c7bf-48ff-a13e-cdd5e2f2d545","stylingFramework":"tailwind","timestamp":"2026-04-16T08:45:14.450Z"}
+{"generationId":"2f6c539a-a967-472f-9d5e-05685be49de3","level":"info","message":"Using v2 multi-agent pipeline","requestId":"cb75ac8c-c7bf-48ff-a13e-cdd5e2f2d545","timestamp":"2026-04-16T08:45:14.450Z"}
+{"framework":"react-ts","level":"info","message":"[PlannerAgent] Creating plan","requestId":"cb75ac8c-c7bf-48ff-a13e-cdd5e2f2d545","timestamp":"2026-04-16T08:45:14.461Z"}
+{"error":"{\"error\":{\"code\":503,\"message\":\"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\"status\":\"UNAVAILABLE\"}}","level":"warn","message":"Provider gemini failed on generateCompletion","requestId":"cb75ac8c-c7bf-48ff-a13e-cdd5e2f2d545","timestamp":"2026-04-16T08:45:16.622Z"}
+{"level":"warn","message":"Plan error (attempt 1): {\"error\":{\"code\":503,\"message\":\"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\"status\":\"UNAVAILABLE\"}}, retrying in 1000ms","requestId":"cb75ac8c-c7bf-48ff-a13e-cdd5e2f2d545","timestamp":"2026-04-16T08:45:16.622Z"}

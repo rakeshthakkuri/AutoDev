@@ -51,6 +51,10 @@ export function getCachedPlan(requirements) {
         complexity: requirements.complexity,
         stylingFramework: requirements.stylingFramework,
         features: requirements.features,
+        // description captures the prompt-specific intent that features alone cannot differentiate
+        description: requirements.description || '',
+        colorScheme: requirements.colorScheme || '',
+        styleDirection: requirements.designIntent?.styleDirection || '',
     });
     return planCache.get(key) || null;
 }
@@ -65,6 +69,9 @@ export function setCachedPlan(requirements, result) {
         complexity: requirements.complexity,
         stylingFramework: requirements.stylingFramework,
         features: requirements.features,
+        description: requirements.description || '',
+        colorScheme: requirements.colorScheme || '',
+        styleDirection: requirements.designIntent?.styleDirection || '',
     });
     planCache.set(key, result);
 }

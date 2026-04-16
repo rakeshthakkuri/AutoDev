@@ -807,21 +807,63 @@ export class AnalysisService {
             : this._inferStylingFramework(userPrompt);
         const safeStylingFramework = this._coerceStylingFramework(framework, stylingFramework);
 
+        // Derive features from the actual prompt so the plan cache key stays unique per prompt.
+        // Generic fallback features ('responsive design', 'modern UI') are identical for all
+        // prompts, causing every generation to collide on the same plan cache entry.
+        const features = this._inferFeaturesFromPrompt(userPrompt);
+
         return {
             projectType,
-            features: ['responsive design', 'modern UI', 'interactive elements'],
+            features,
             styling: 'modern',
             framework,
             stylingFramework: safeStylingFramework,
             complexity: 'simple',
             colorScheme: '',
             layout: '',
-            description: `A ${projectType} built with ${framework}`,
+            // Use the actual user prompt (truncated) so the plan cache key is prompt-specific.
+            description: userPrompt.trim().substring(0, 200),
             designIntent: this._defaultDesignIntent(projectType),
             isFallback: true,
             usedFallback: true,
             warning: 'Could not parse AI response; using default requirements.'
         };
+    }
+
+    _inferFeaturesFromPrompt(userPrompt) {
+        const p = userPrompt.toLowerCase();
+        const features = [];
+
+        // Collect domain-specific keywords present in the prompt
+        const checks = [
+            [['auth', 'login', 'signup', 'register', 'account'], 'authentication'],
+            [['dashboard', 'analytics', 'chart', 'graph', 'metric', 'stat'], 'data dashboard'],
+            [['todo', 'task', 'kanban', 'project management'], 'task management'],
+            [['shop', 'store', 'cart', 'product', 'checkout', 'payment', 'ecommerce'], 'e-commerce'],
+            [['blog', 'post', 'article', 'content', 'cms'], 'content management'],
+            [['portfolio', 'showcase', 'gallery', 'work', 'project'], 'portfolio showcase'],
+            [['landing', 'marketing', 'hero', 'cta', 'conversion'], 'marketing landing page'],
+            [['chat', 'message', 'real-time', 'socket'], 'real-time messaging'],
+            [['map', 'location', 'geo', 'place'], 'map/location'],
+            [['music', 'audio', 'player', 'playlist', 'song'], 'media player'],
+            [['video', 'stream', 'watch'], 'video streaming'],
+            [['weather', 'forecast', 'temperature', 'climate'], 'weather display'],
+            [['social', 'feed', 'profile', 'follow', 'like'], 'social features'],
+            [['quiz', 'survey', 'form', 'poll'], 'interactive forms'],
+            [['game', 'play', 'score', 'level'], 'game mechanics'],
+        ];
+
+        for (const [keywords, label] of checks) {
+            if (keywords.some(kw => p.includes(kw))) {
+                features.push(label);
+            }
+        }
+
+        // Always add responsive design; pad to at least 2 entries
+        features.push('responsive design');
+        if (features.length < 2) features.push('modern UI');
+
+        return [...new Set(features)];
     }
 
     _normalizeAnalysis(result, userPrompt, options = {}) {

@@ -3,7 +3,6 @@ import { recordGeneration } from '../../../routes/metrics.js';
 import { ProjectGenerationService } from '../../projectGeneration.js';
 import { createStorageService } from '../../storage/index.js';
 import { AnalysisService } from '../../analysis.js';
-import { recordUsageEvent } from '../../usage.js';
 import config from '../../../config.js';
 import logger from '../../logger.js';
 
@@ -72,21 +71,7 @@ export async function processGeneration(job) {
             await recordGeneration(result.metricsRecord);
         }
 
-        if (userId && config.databaseUrl) {
-            try {
-                await recordUsageEvent({
-                    userId,
-                    apiKeyId,
-                    projectJobId: jobId,
-                    eventType: 'generation',
-                    tokensUsed: result.metricsRecord?.tokensUsed ?? null,
-                    durationMs: Date.now() - startTime,
-                    llmProvider: 'gemini',
-                });
-            } catch (e) {
-                logger.warn('recordUsageEvent skipped', { error: e.message });
-            }
-        }
+        // Usage events require a database — skipped.
 
         logger.info('Generation job complete', { jobId, durationMs: Date.now() - startTime });
         return { jobId, success: true };

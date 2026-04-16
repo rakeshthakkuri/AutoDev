@@ -9,7 +9,6 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 
 import config from './config.js';
-import { healthCheck, closePool, hasDatabase } from './db/index.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { deprecationApiHeaders } from './middleware/deprecationApi.js';
@@ -18,7 +17,6 @@ import { initializeModel } from './services/llm.js';
 import { AnalysisService } from './services/analysis.js';
 import { ProjectGenerationService } from './services/projectGeneration.js';
 import { createStorageService } from './services/storage/index.js';
-import { initQueue, stopQueue } from './services/queue/index.js';
 import { startScheduler, stopScheduler } from './jobs/scheduler.js';
 import healthRouter from './routes/health.js';
 import { createDownloadRouter } from './routes/download.js';
@@ -40,23 +38,7 @@ if (!fs.existsSync(GENERATED_DIR)) fs.mkdirSync(GENERATED_DIR, { recursive: true
 
 const storageService = await createStorageService();
 
-if (hasDatabase()) {
-    try {
-        await healthCheck();
-    } catch (e) {
-        logger.error('Database health check failed', { error: e.message });
-    }
-}
-
-let queueAvailable = false;
-if (hasDatabase()) {
-    try {
-        const q = await initQueue();
-        queueAvailable = !!q;
-    } catch (e) {
-        logger.warn('Job queue not available', { error: e.message });
-    }
-}
+const queueAvailable = false;
 
 const analysisService = new AnalysisService();
 const projectGenerationService = new ProjectGenerationService(GENERATED_DIR, storageService);
@@ -165,8 +147,6 @@ async function gracefulShutdown(signal) {
     logger.info(`${signal} received. Shutting down gracefully...`);
 
     stopScheduler();
-    await stopQueue().catch(() => {});
-    await closePool().catch(() => {});
 
     if (server.closeAllConnections) server.closeAllConnections();
     if (server.closeIdleConnections) server.closeIdleConnections();

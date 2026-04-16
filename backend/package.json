@@ -49,8 +49,6 @@
     "jsonwebtoken": "^9.0.3",
     "lru-cache": "^11.2.5",
     "openai": "^6.34.0",
-    "pg": "^8.20.0",
-    "pg-boss": "^12.15.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {

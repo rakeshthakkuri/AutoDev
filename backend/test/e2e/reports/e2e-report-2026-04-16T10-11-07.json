@@ -1,0 +1,156 @@
+{
+  "results": [
+    {
+      "id": "react-todo",
+      "label": "React + Tailwind — Todo App (Simple)",
+      "isEdgeCase": false,
+      "edgeCaseNote": null,
+      "startTime": "2026-04-16T10:08:28.694Z",
+      "phases": {
+        "analyze": {
+          "pass": true,
+          "durationMs": 18668,
+          "framework": "react",
+          "sessionId": "1f803faa-fa3d-4de9-9949-bf2a1e94b8f8"
+        },
+        "plan": {
+          "pass": true,
+          "durationMs": 14173,
+          "fileCount": 12,
+          "files": [
+            {
+              "path": "public/index.html",
+              "purpose": "Main HTML file, entry point for the React application, contains the root element."
+            },
+            {
+              "path": "src/main.jsx",
+              "purpose": "Renders the React application into the DOM, setting up the root component."
+            },
+            {
+              "path": "src/App.jsx",
+              "purpose": "The main application component, orchestrating the Todo app's layout and state."
+            },
+            {
+              "path": "src/index.css",
+              "purpose": "Global CSS file, primarily used for importing Tailwind CSS directives."
+            },
+            {
+              "path": "src/components/TodoForm.jsx",
+              "purpose": "Component for adding new tasks, includes an input field and an add button."
+            },
+            {
+              "path": "src/components/TodoList.jsx",
+              "purpose": "Component for displaying the list of tasks, renders individual TodoItem components."
+            },
+            {
+              "path": "src/components/TodoItem.jsx",
+              "purpose": "Component for a single task, includes task text, complete checkbox/button, and delete button."
+            },
+            {
+              "path": "src/hooks/useTodos.js",
+              "purpose": "Custom hook for managing todo state (add, complete, delete) and potentially local storage persistence."
+            },
+            {
+              "path": "package.json",
+              "purpose": "Defines project metadata, scripts, and lists project dependencies."
+            },
+            {
+              "path": "tailwind.config.js",
+              "purpose": "Tailwind CSS configuration file, for customizing themes, plugins, and purging."
+            },
+            {
+              "path": "postcss.config.js",
+              "purpose": "PostCSS configuration, typically used by Tailwind CSS for processing CSS."
+            },
+            {
+              "path": ".gitignore",
+              "purpose": "Specifies intentionally untracked files to ignore by Git."
+            }
+          ],
+          "sortedByDependency": false
+        },
+        "generate": {
+          "pass": true,
+          "durationMs": 125849,
+          "filesGenerated": 12,
+          "totalFiles": null,
+          "mode": "sse",
+          "jobId": null,
+          "projectId": "project_1876a40c",
+          "validationResult": null
+        }
+      },
+      "checks": {
+        "entry-point": {
+          "pass": true,
+          "detail": "React entry found"
+        },
+        "import-resolution": {
+          "pass": true,
+          "detail": "All relative imports resolve",
+          "issues": []
+        },
+        "package-json": {
+          "pass": false,
+          "detail": "Missing: lucide-react",
+          "missing": [
+            "lucide-react"
+          ],
+          "declared": [
+            "@testing-library/jest-dom",
+            "@testing-library/react",
+            "@testing-library/user-event",
+            "react",
+            "react-dom",
+            "react-scripts",
+            "uuid",
+            "web-vitals",
+            "autoprefixer",
+            "postcss",
+            "tailwindcss"
+          ]
+        },
+        "react-jsx": {
+          "pass": true,
+          "detail": "JSX OK",
+          "issues": []
+        },
+        "tailwind-classes": {
+          "pass": true,
+          "detail": "4/6 (67%)",
+          "ratio": 0.6666666666666666
+        }
+      },
+      "files": {
+        ".gitignore": "logs\n*.log\nnpm-debug.log*\nyarn-debug.log*\nyarn-error.log*\npnpm-debug.log*\nlerna-debug.log*\n\n\n.report/\n\n\n.next/\n.nuxt/\n.vuepress/dist/\n.serverless/\n.fusebox/\n.webpack/\n.parcel-cache/\n.svelte-kit/\n.astro/\n.history/\n\n\ndist/\nbuild/\nes/\nlib/\ntmp/\n\n\nnode_modules/\njspm_modules/\nweb_modules/\n\n\n.npm/\n\n\n.eslintcache\n\n\n.stylelintcache\n\n\n.microbundle/\n\n\n.cache/\n.next/cache/\n.parcel-cache/\n.rollup.cache/\n.vite/\n.turbo/\n\n\n.env\n.env.local\n.env.development.local\n.env.test.local\n.env.production.local\n.env.staging.local\n.env.preview.local\n.env.*.local\n.env.development\n.env.test\n.env.production\n.env.staging\n.env.preview\n\n\n.env.development\n.env.test\n.env.production\n\n\n.idea/\n.vscode/\n*.suo\n*.ntvsps\n*.njsproj\n*.sln\n*.bak\n*.user\n*.code-workspace\n\n\n.DS_Store\n\n\n.thumbnails/\n\n\nbuild/\ndist/\nout/\n\n\ncoverage/\n\n\njunit.xml\ntest-results.xml\n*.lcov\n*.lcov.info\n\n\n.storybook/out\n\n\n.next/\n\n\n.nuxt/\n.output/\n\n\n.cache/\npublic/\n\n\n.svelte-kit/\n\n\n.astro/\n\n\n.vscode/\n\n\n*.tgz\n*.zip\n*.rar\n*.7z\n*.gz\n*.log\n*.swp\n*.swo\n*.bak\n*.orig\n*.rej\n*.diff\n*.patch\n*.tmp\n*.DS_Store\nThumbs.db\nehthumbs.db\nDesktop.ini\n\n\n\nbuild/\n\n\nstorybook-static/\n\n\n.vercel/\n.netlify/\n\n\ncypress/videos/\ncypress/screenshots/\n\n\ntest-results/\n\n\nbuild/\n\n\n.pnp/\n.pnp.js\n\n\n.yarn/install-state.gz\n\n\n.pnpm-store/\n\n\npackage-lock.json\n\n\nyarn.lock\n\n\npnpm-lock.yaml\n\n\n.node_gyp/\n\n\nout/\nrelease/\n\n\n*.tmp\n*.temp\n\n\n.idea/\n.vscode/\n*.iml\n*.iws\n*.ipr\n*.classpath\n*.project\n.settings/\n\n\n.DS_Store\nThumbs.db\n\n\n*.log\nnpm-debug.log*\nyarn-debug.log*\nyarn-error.log*\npnpm-debug.log*\nlerna-debug.log*\n.env\n.env.local\n.env.development.local\n.env.test.local\n.env.production.local\n.env.staging.local\n.env.preview.local\n.env.*.local\n.env.development\n.env.test\n.env.production\n.env.staging\n.env.preview\n.eslintcache\n.stylelintcache\n.next/\n.nuxt/\n.vuepress/dist/\n.serverless/\n.fusebox/\n.webpack/\n.parcel-cache/\n.svelte-kit/\n.astro/\n.history/\ndist/\nbuild/\nes/\nlib/\ntmp/\nnode_modules/\njspm_modules/\nweb_modules/\n.npm/\n.microbundle/\n.cache/\n.next/cache/\n.parcel-cache/\n.rollup.cache/\n.vite/\n.turbo/\n.report/\ncoverage/\njunit.xml\ntest-results.xml\n*.lcov\n*.lcov.info\n.storybook/out\npublic/\nstorybook-static/\n.vercel/\n.netlify/\ncypress/videos/\ncypress/screenshots/\ntest-results/\n.pnp/\n.pnp.js\n.yarn/install-state.gz\n.pnpm-store/\npackage-lock.json\nyarn.lock\npnpm-lock.yaml\n.node_gyp/\nout/\nrelease/\n*.tmp\n*.temp\n*.iml\n*.iws\n*.ipr\n*.classpath\n*.project\n.settings/\nThumbs.db\nehthumbs.db\nDesktop.ini",
+        "package.json": "{\n  \"name\": \"react-tailwind-todo\",\n  \"version\": \"0.1.0\",\n  \"private\": true,\n  \"dependencies\": {\n    \"@testing-library/jest-dom\": \"^5.17.0\",\n    \"@testing-library/react\": \"^13.4.0\",\n    \"@testing-library/user-event\": \"^13.5.0\",\n    \"react\": \"^18.3.1\",\n    \"react-dom\": \"^18.3.1\",\n    \"react-scripts\": \"5.0.1\",\n    \"uuid\": \"^9.0.1\",\n    \"web-vitals\": \"^2.1.4\"\n  },\n  \"scripts\": {\n    \"start\": \"react-scripts start\",\n    \"build\": \"react-scripts build\",\n    \"test\": \"react-scripts test\",\n    \"eject\": \"react-scripts eject\"\n  },\n  \"eslintConfig\": {\n    \"extends\": [\n      \"react-app\",\n      \"react-app/jest\"\n    ]\n  },\n  \"browserslist\": {\n    \"production\": [\n      \">0.2%\",\n      \"not dead\",\n      \"not op_mini all\"\n    ],\n    \"development\": [\n      \"last 1 chrome version\",\n      \"last 1 firefox version\",\n      \"last 1 safari version\"\n    ]\n  },\n  \"devDependencies\": {\n    \"autoprefixer\": \"^10.4.19\",\n    \"postcss\": \"^8.4.38\",\n    \"tailwindcss\": \"^3.4.3\"\n  }\n}",
+        "postcss.config.js": "module.exports = {\n  plugins: {\n    tailwindcss: {},\n    autoprefixer: {},\n  },\n};",
+        "public/index.html": "<!DOCTYPE HTML>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <link rel=\"icon\" href=\"%PUBLIC_URL%/favicon.ico\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"theme-color\" content=\"#0ea5e9\" />\n    <meta\n      name=\"description\"\n      content=\"A modern todo application built with React and Tailwind CSS.\"\n    />\n    <link rel=\"apple-touch-icon\" href=\"%PUBLIC_URL%/logo192.png\" />\n    <!--\n      manifest.json provides metadata used when your web app is installed on a\n      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/\n    -->\n    <link rel=\"manifest\" href=\"%PUBLIC_URL%/manifest.json\" />\n    <!--\n      Notice the use of %PUBLIC_URL% in the tags above.\n      It will be replaced with the URL of the public folder during the build.\n      Only files inside the public folder can be referenced from the HTML.\n\n      Unlike \"/favicon.ico\" or \"favicon.ico\", \"%PUBLIC_URL%/favicon.ico\" will\n      work correctly both with client-side routing and a non-root public URL.\n      Learn how to configure a non-root public URL by running `npm run build`.\n    -->\n    <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Montserrat:wght@600;700;800&display=swap\" rel=\"stylesheet\">\n    <title>React Todo App</title>\n  </head>\n  <body class=\"bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans antialiased\">\n    <noscript>You need to enable JavaScript to run this app.</noscript>\n    <div id=\"root\"></div>\n    <!--\n      This HTML file is a template.\n      If you open it directly in the browser, you will see an empty page.\n\n      You can add webfonts, meta tags, or analytics to this file.\n      The build step will place the bundled scripts into the <body> tag.\n\n      To begin the development, run `npm start` or `yarn start`.\n      To create a production bundle, use `npm run build` or `yarn build`.\n    -->\n  </body>\n</html>",
+        "src/App.jsx": "import React from 'react';\nimport TodoList from './components/TodoList';\n\nfunction App() {\n  return (\n    <div className=\"min-h-screen bg-gradient-to-br from-primary-500 to-primary-700 font-sans text-gray-900 dark:text-gray-100 flex items-center justify-center p-4 sm:p-6 lg:p-8\">\n      <div className=\"w-full max-w-2xl bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 sm:p-8 lg:p-10 space-y-8 transform transition-all duration-300 hover:shadow-3xl\">\n        <header className=\"text-center\">\n          <h1 className=\"text-4xl sm:text-5xl font-display font-extrabold text-primary-600 dark:text-primary-400 mb-2 animate-fade-in-down\">\n            My Daily Tasks\n          </h1>\n          <p className=\"text-lg sm:text-xl text-gray-600 dark:text-gray-300 animate-fade-in-up\">\n            Stay organized and productive.\n          </p>\n        </header>\n\n        <main className=\"space-y-6\">\n          <TodoList />\n        </main>\n\n        <footer className=\"text-center text-sm text-gray-500 dark:text-gray-400 pt-4 border-t border-gray-200 dark:border-gray-700\">\n          <p>&copy; {new Date().getFullYear()} Todo App. All rights reserved.</p>\n        </footer>\n      </div>\n    </div>\n  );\n}\n\nexport default App;",
+        "src/components/TodoForm.jsx": "import React, { useState } from 'react';\nimport { Plus } from 'lucide-react';\n\nconst TodoForm = ({ addTodo }) => {\n  const [task, setTask] = useState('');\n\n  const handleSubmit = (e) => {\n    e.preventDefault();\n    if (task.trim()) {\n      addTodo(task);\n      setTask('');\n    }\n  };\n\n  return (\n    <form onSubmit={handleSubmit} className=\"flex items-center gap-2 p-4 bg-white rounded-lg shadow-md mb-6\">\n      <input\n        type=\"text\"\n        value={task}\n        onChange={(e) => setTask(e.target.value)}\n        placeholder=\"What needs to be done?\"\n        aria-label=\"Add new todo task\"\n        className=\"flex-grow p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-400 text-gray-800 text-base md:text-lg transition-all duration-200 ease-in-out\"\n      />\n      <button\n        type=\"submit\"\n        className=\"flex-shrink-0 px-5 py-3 bg-primary-500 text-white rounded-md hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:ring-offset-2 transition-all duration-200 ease-in-out flex items-center gap-2 text-base md:text-lg font-medium shadow-sm hover:shadow-md\"\n        aria-label=\"Add task\"\n      >\n        <Plus size={20} />\n        Add Task\n      </button>\n    </form>\n  );\n};\n\nexport default TodoForm;",
+        "src/components/TodoItem.jsx": "import React from 'react';\nimport { Check, Trash2, Edit } from 'lucide-react';\n\nconst TodoItem = ({ todo, toggleComplete, deleteTodo, editTodo }) => {\n  return (\n    <li\n      className={`\n        flex items-center justify-between p-4 mb-3 rounded-lg shadow-md transition-all duration-300 ease-in-out\n        ${todo.completed ? 'bg-green-50 dark:bg-green-900/30 border-l-4 border-green-500' : 'bg-white dark:bg-gray-800 border-l-4 border-transparent'}\n        hover:shadow-lg transform hover:-translate-y-1\n      `}\n    >\n      <div className=\"flex items-center flex-grow\">\n        <input\n          type=\"checkbox\"\n          checked={todo.completed}\n          onChange={() => toggleComplete(todo.id)}\n          className=\"\n            form-checkbox h-5 w-5 text-primary-500 rounded border-gray-300 focus:ring-primary-400\n            dark:bg-gray-700 dark:border-gray-600 dark:checked:bg-primary-500 dark:focus:ring-primary-600\n            cursor-pointer\n          \"\n          aria-label={`Mark ${todo.text} as complete`}\n        />\n        <span\n          className={`\n            ml-4 text-lg font-medium flex-grow\n            ${todo.completed ? 'line-through text-gray-500 dark:text-gray-400' : 'text-gray-800 dark:text-gray-100'}\n            break-words\n          `}\n        >\n          {todo.text}\n        </span>\n      </div>\n      <div className=\"flex items-center space-x-2 ml-4\">\n        <button\n          onClick={() => editTodo(todo.id)}\n          className=\"\n            p-2 rounded-full text-gray-600 hover:text-primary-600 hover:bg-primary-100\n            dark:text-gray-300 dark:hover:text-primary-400 dark:hover:bg-gray-700\n            focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50\n            transition-colors duration-200\n          \"\n          aria-label={`Edit ${todo.text}`}\n        >\n          <Edit size={20} />\n        </button>\n        <button\n          onClick={() => deleteTodo(todo.id)}\n          className=\"\n            p-2 rounded-full text-red-600 hover:text-red-800 hover:bg-red-100\n            dark:text-red-400 dark:hover:text-red-200 dark:hover:bg-red-900/30\n            focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50\n            transition-colors duration-200\n          \"\n          aria-label={`Delete ${todo.text}`}\n        >\n          <Trash2 size={20} />\n        </button>\n      </div>\n    </li>\n  );\n};\n\nexport default TodoItem;",
+        "src/components/TodoList.jsx": "import React, { useState, useEffect } from 'react';\nimport TodoForm from './TodoForm';\nimport TodoItem from './TodoItem';\nimport useTodos from '../hooks/useTodos';\n\nconst TodoList = () => {\n  const { todos, addTodo, toggleComplete, deleteTodo, editTodo } = useTodos();\n  const [filter, setFilter] = useState('all'); // 'all', 'active', 'completed'\n  const [searchTerm, setSearchTerm] = useState('');\n\n  const filteredTodos = todos.filter(todo => {\n    const matchesFilter = filter === 'all' ||\n                          (filter === 'active' && !todo.completed) ||\n                          (filter === 'completed' && todo.completed);\n    const matchesSearch = todo.text.toLowerCase().includes(searchTerm.toLowerCase());\n    return matchesFilter && matchesSearch;\n  });\n\n  const remainingTasks = todos.filter(todo => !todo.completed).length;\n\n  return (\n    <div className=\"container mx-auto p-4 sm:p-6 lg:p-8 max-w-2xl bg-white shadow-xl rounded-2xl my-8 font-sans\">\n      <h1 className=\"text-4xl font-display font-extrabold text-gray-900 mb-8 text-center\">\n        My Daily Tasks\n      </h1>\n\n      <TodoForm addTodo={addTodo} />\n\n      <div className=\"flex flex-col sm:flex-row items-center justify-between mt-8 mb-6 gap-4\">\n        <div className=\"flex space-x-2 sm:space-x-3\">\n          <button\n            onClick={() => setFilter('all')}\n            className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200\n              ${filter === 'all' ? 'bg-primary-500 text-white shadow-md' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}\n            aria-pressed={filter === 'all'}\n          >\n            All\n          </button>\n          <button\n            onClick={() => setFilter('active')}\n            className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200\n              ${filter === 'active' ? 'bg-primary-500 text-white shadow-md' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}\n            aria-pressed={filter === 'active'}\n          >\n            Active\n          </button>\n          <button\n            onClick={() => setFilter('completed')}\n            className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200\n              ${filter === 'completed' ? 'bg-primary-500 text-white shadow-md' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}\n            aria-pressed={filter === 'completed'}\n          >\n            Completed\n          </button>\n        </div>\n        <div className=\"relative w-full sm:w-auto\">\n          <input\n            type=\"text\"\n            placeholder=\"Search tasks...\"\n            value={searchTerm}\n            onChange={(e) => setSearchTerm(e.target.value)}\n            className=\"pl-10 pr-4 py-2 w-full sm:w-64 border border-gray-300 rounded-full focus:ring-2 focus:ring-primary-200 focus:border-primary-400 transition-all duration-200 text-sm\"\n            aria-label=\"Search tasks\"\n          />\n          <svg\n            className=\"absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400\"\n            xmlns=\"http://www.w3.org/2000/svg\"\n            width=\"18\"\n            height=\"18\"\n            viewBox=\"0 0 24 24\"\n            fill=\"none\"\n            stroke=\"currentColor\"\n            strokeWidth=\"2\"\n            strokeLinecap=\"round\"\n            strokeLinejoin=\"round\"\n          >\n            <circle cx=\"11\" cy=\"11\" r=\"8\"></circle>\n            <line x1=\"21\" y1=\"21\" x2=\"16.65\" y2=\"16.65\"></line>\n          </svg>\n        </div>\n      </div>\n\n      {filteredTodos.length === 0 && (\n        <p className=\"text-center text-gray-500 text-lg mt-10 p-4 bg-gray-50 rounded-lg\">\n          {todos.length === 0 ? \"You have no tasks yet. Add one above!\" : \"No tasks match your current filter or search.\"}\n        </p>\n      )}\n\n      <ul className=\"space-y-4 mt-6\">\n        {filteredTodos.map(todo => (\n          <TodoItem\n            key={todo.id}\n            todo={todo}\n            toggleComplete={toggleComplete}\n            deleteTodo={deleteTodo}\n            editTodo={editTodo}\n          />\n        ))}\n      </ul>\n\n      <div className=\"mt-8 pt-6 border-t border-gray-200 text-gray-600 text-sm flex justify-between items-center\">\n        <span>{remainingTasks} tasks remaining</span>\n        <button\n          onClick={() => setFilter('all')}\n          className=\"text-primary-600 hover:text-primary-800 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-200 rounded-md px-2 py-1\"\n        >\n          Clear filters\n        </button>\n      </div>\n    </div>\n  );\n};\n\nexport default TodoList;",
+        "src/hooks/useTodos.js": "import { useState, useEffect, useCallback } from 'react';\nimport { v4 as uuidv4 } from 'uuid';\n\nconst useTodos = () => {\n  const [todos, setTodos] = useState(() => {\n    const savedTodos = localStorage.getItem('todos');\n    return savedTodos ? JSON.parse(savedTodos) : [];\n  });\n\n  useEffect(() => {\n    localStorage.setItem('todos', JSON.stringify(todos));\n  }, [todos]);\n\n  const addTodo = useCallback((text) => {\n    if (text.trim()) {\n      setTodos((prevTodos) => [\n        ...prevTodos,\n        { id: uuidv4(), text, completed: false },\n      ]);\n    }\n  }, []);\n\n  const toggleTodo = useCallback((id) => {\n    setTodos((prevTodos) =>\n      prevTodos.map((todo) =>\n        todo.id === id ? { ...todo, completed: !todo.completed } : todo\n      )\n    );\n  }, []);\n\n  const deleteTodo = useCallback((id) => {\n    setTodos((prevTodos) => prevTodos.filter((todo) => todo.id !== id));\n  }, []);\n\n  const editTodo = useCallback((id, newText) => {\n    setTodos((prevTodos) =>\n      prevTodos.map((todo) =>\n        todo.id === id ? { ...todo, text: newText } : todo\n      )\n    );\n  }, []);\n\n  return {\n    todos,\n    addTodo,\n    toggleTodo,\n    deleteTodo,\n    editTodo,\n  };\n};\n\nexport default useTodos;",
+        "src/index.css": "/* Custom scrollbar for better aesthetics */\n::-webkit-scrollbar {\n  width: 8px;\n  height: 8px;\n}\n\n::-webkit-scrollbar-track {\n  background: theme('colors.gray.100');\n  border-radius: 10px;\n}\n\n::-webkit-scrollbar-thumb {\n  background: theme('colors.primary.400');\n  border-radius: 10px;\n}\n\n::-webkit-scrollbar-thumb:hover {\n  background: theme('colors.primary.500');\n}\n\n/* Base styles for the body */\nbody {\n  @apply bg-gray-50 text-gray-800 font-sans antialiased;\n}\n\n/* Focus styles for accessibility */\n*:focus-visible {\n  @apply outline-none ring-2 ring-primary-400 ring-offset-2 ring-offset-gray-50;\n}\n\n/* Custom utility for task completion line-through */\n.line-through-custom {\n  text-decoration: line-through;\n  text-decoration-color: theme('colors.primary.500');\n  text-decoration-thickness: 2px;\n}",
+        "src/main.jsx": "import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\nimport './index.css';\n\nconst root = ReactDOM.createRoot(document.getElementById('root'));\nroot.render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>\n);",
+        "tailwind.config.js": "/** @type {import('tailwindcss').Config} */\nmodule.exports = {\n  content: [\n    \"./src/**/*.{js,jsx,ts,tsx}\",\n    \"./public/index.html\",\n  ],\n  theme: {\n    extend: {\n      fontFamily: {\n        sans: ['Inter', 'sans-serif'],\n        display: ['Montserrat', 'sans-serif'],\n      },\n      colors: {\n        primary: {\n          50: '#f0f9ff',\n          100: '#e0f2fe',\n          200: '#bae6fd',\n          300: '#7dd3fc',\n          400: '#38bdf8',\n          500: '#0ea5e9', // Main accent blue\n          600: '#0284c7',\n          700: '#0369a1',\n          800: '#075985',\n          900: '#0c4a6e',\n          950: '#082f49',\n        },\n        secondary: {\n          50: '#fdf2f8',\n          100: '#fce7f3',\n          200: '#fbcfe8',\n          300: '#f9a8d4',\n          400: '#f472b6',\n          500: '#ec4899', // Main accent pink\n          600: '#db2777',\n          700: '#be185d',\n          800: '#9d174d',\n          900: '#831843',\n          950: '#500724',\n        },\n        gray: {\n          50: '#f9fafb',\n          100: '#f3f4f6',\n          200: '#e5e7eb',\n          300: '#d1d5db',\n          400: '#9ca3af',\n          500: '#6b7280',\n          600: '#4b5563',\n          700: '#374151',\n          800: '#1f2937',\n          900: '#111827',\n          950: '#030712',\n        },\n      },\n      boxShadow: {\n        'neumorphic-light': '5px 5px 10px #d1d9e6, -5px -5px 10px #ffffff',\n        'neumorphic-dark': '5px 5px 10px #1a202c, -5px -5px 10px #2c3440',\n        'neumorphic-inset-light': 'inset 5px 5px 10px #d1d9e6, inset -5px -5px 10px #ffffff',\n        'neumorphic-inset-dark': 'inset 5px 5px 10px #1a202c, inset -5px -5px 10px #2c3440',\n      },\n      animation: {\n        'fade-in': 'fadeIn 0.5s ease-out forwards',\n        'slide-down': 'slideDown 0.3s ease-out forwards',\n        'pop-in': 'popIn 0.3s cubic-bezier(0.68, -0.55, 0.27, 1.55) forwards',\n      },\n      keyframes: {\n        fadeIn: {\n          '0%': { opacity: '0' },\n          '100%': { opacity: '1' },\n        },\n        slideDown: {\n          '0%': { transform: 'translateY(-20px)', opacity: '0' },\n          '100%': { transform: 'translateY(0)', opacity: '1' },\n        },\n        popIn: {\n          '0%': { transform: 'scale(0.8)', opacity: '0' },\n          '100%': { transform: 'scale(1)', opacity: '1' },\n        },\n      },\n    },\n  },\n  plugins: [],\n}"
+      },
+      "fileCount": 12,
+      "durationMs": 158760,
+      "overall": "fail",
+      "errors": [
+        "[package-json] Missing: lucide-react"
+      ],
+      "warnings": [
+        "Plan files 12 > max 8",
+        "Slow: 126s"
+      ]
+    }
+  ],
+  "meta": {
+    "timestamp": "2026-04-16T10:11:07.454Z",
+    "baseUrl": "http://localhost:5001",
+    "totalDurationMs": 158761,
+    "variantCount": 1
+  }
+}

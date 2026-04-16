@@ -70,6 +70,7 @@ HARD RULES — violating any of these is a build-breaking failure:
    - Props/interface this component accepts: {props}
    - If the default export is a React/Vue/Svelte component, it MUST be a function (not a plain object).
    - Do NOT use \`export default {{ A, B }}\` (object literal) — that is an anti-pattern.
+   - If this file is an App/Page/root component, read <context> to identify required child props and pass them explicitly; rendering child components without their required props is a build-breaking failure.
 
 4. IMPORTS
    - Only import from files that exist in the project (see <context> below).
@@ -124,6 +125,8 @@ COMPONENT FILES (.jsx, .tsx, .vue, .svelte):
 
 PAGE FILES (App.jsx, page.tsx, index.html, index.astro):
 - Must compose child components — do NOT inline everything in one giant file.
+- When calling a custom hook (hooks/use*.js or composables/use*.js), destructure all returned values and pass each value explicitly to the child component that uses it.
+- Before rendering a child component, inspect the <context> section to identify expected props and pass all required props explicitly.
 - Must establish clear visual hierarchy with typography and spacing.
 - Must be responsive (mobile-first with clean breakpoints).
 - Must include real, contextually appropriate content.

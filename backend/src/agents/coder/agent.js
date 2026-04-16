@@ -240,6 +240,8 @@ const FRAMEWORK_RULES_V2 = {
 - Functional components with hooks (useState, useEffect, useCallback, useMemo).
 - JSX syntax: className (not class), htmlFor (not for), onClick, onChange.
 - Every component file MUST export default a function component.
+- Destructure props with safe defaults for arrays/objects to prevent runtime crashes (e.g., ({ items = [], config = {} })).
+- If using framer-motion scroll/motion containers, ensure the immediate container has non-static position (relative/absolute/fixed).
 - Import children with relative paths (e.g., './components/Header').
 - Use inline SVGs or lucide-react for icons.
 - Use high-quality Unsplash URLs for images.
@@ -250,6 +252,8 @@ const FRAMEWORK_RULES_V2 = {
 - Use React.FC<Props> or typed function signatures.
 - Typed hooks: useState<Type>, useRef<HTMLElement | null>.
 - Every component file MUST export default a typed function component.
+- Destructure props with safe defaults for arrays/objects to prevent runtime crashes (e.g., ({ items = [], config = {} }: Props)).
+- If using framer-motion scroll/motion containers, ensure the immediate container has non-static position (relative/absolute/fixed).
 - Use ONLY relative import paths (e.g., './components/Header') — NEVER use @/ path aliases.
 - For tsconfig.json: strict mode, jsx: "react-jsx".`,
 

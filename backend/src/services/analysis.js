@@ -430,11 +430,10 @@ export class AnalysisService {
 
         prompt = prompt.replace('{frameworkHint}', frameworkHint).replace('{stylingHint}', stylingHint);
 
-        const maxAnalyzeAttempts = 2;
+        const maxAnalyzeAttempts = 4;
         for (let attempt = 1; attempt <= maxAnalyzeAttempts; attempt++) {
             try {
                 const response = await generateCompletion(prompt, {
-                    maxTokens: 800,
                     temperature: 0.1,
                     systemPrompt: this.jsonSystemPrompt,
                     responseMimeType: 'application/json'
@@ -493,8 +492,9 @@ export class AnalysisService {
         const complexity = requirements.complexity || 'simple';
         const stylingFramework = requirements.stylingFramework || 'plain-css';
 
+        const plannerInput = this._buildPlannerRequirements(requirements);
         const prompt = PLANNER_PROMPT
-            .replace('{requirements}', JSON.stringify(requirements, null, 2))
+            .replace('{requirements}', JSON.stringify(plannerInput))
             .replace('{projectType}', projectType)
             .replace('{framework}', framework)
             .replace('{stylingFramework}', stylingFramework)
@@ -502,11 +502,10 @@ export class AnalysisService {
 
         const planSystemPrompt = 'You MUST output ONLY a valid JSON object. NO markdown code fences (NO ```json), NO conversational text, NO explanations. Output MUST start with { and end with }.';
 
-        const maxPlanAttempts = 2;
+        const maxPlanAttempts = 4;
         for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
             try {
                 const response = await generateCompletion(prompt, {
-                    maxTokens: 1500,
                     temperature: 0.1,
                     systemPrompt: planSystemPrompt,
                     responseMimeType: 'application/json'
@@ -919,6 +918,7 @@ export class AnalysisService {
         if (stylingFramework === 'tailwind') {
             files = addTailwindFiles(files, framework);
         }
+        files = this._augmentFallbackFiles(files, requirements, framework);
 
         // Defensive: never return empty files
         if (files.length === 0) {
@@ -936,6 +936,98 @@ export class AnalysisService {
             usedFallback: true,
             warning: 'Could not parse AI response; using default file list.'
         };
+    }
+
+    _buildPlannerRequirements(requirements = {}) {
+        return {
+            projectType: requirements.projectType || 'web-app',
+            framework: requirements.framework || config.defaultFramework,
+            stylingFramework: requirements.stylingFramework || 'plain-css',
+            complexity: requirements.complexity || 'simple',
+            features: Array.isArray(requirements.features) ? requirements.features.slice(0, 12) : [],
+            description: requirements.description || '',
+            colorScheme: requirements.colorScheme || '',
+            styleDirection: requirements.designIntent?.styleDirection || ''
+        };
+    }
+
+    _augmentFallbackFiles(files, requirements, framework) {
+        const out = [...files];
+        const combinedText = [
+            requirements.projectType,
+            requirements.description,
+            ...(Array.isArray(requirements.features) ? requirements.features : [])
+        ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+
+        const needsTask = /\b(todo|task|kanban)\b/.test(combinedText);
+        const needsAuth = /\b(auth|login|signup|register|account)\b/.test(combinedText);
+        const needsDashboard = /\b(dashboard|analytics|metric|chart)\b/.test(combinedText);
+        const needsCommerce = /\b(shop|store|cart|checkout|product|e-commerce|ecommerce)\b/.test(combinedText);
+
+        const addUnique = (path, purpose) => {
+            if (!out.some(f => f.path === path)) out.push({ path, purpose });
+        };
+
+        if (framework === 'react') {
+            if (needsTask) {
+                addUnique('src/components/TodoList.jsx', 'Task list with filtering and completion controls');
+                addUnique('src/components/TodoItem.jsx', 'Single task row with edit/toggle actions');
+                addUnique('src/hooks/useLocalStorage.js', 'Persist todo state in localStorage');
+            }
+            if (needsAuth) {
+                addUnique('src/components/LoginForm.jsx', 'Login form with validation and submit handling');
+                addUnique('src/context/AuthContext.jsx', 'Authentication context and session state');
+            }
+            if (needsDashboard) {
+                addUnique('src/components/KpiCard.jsx', 'KPI/stat card for dashboard metrics');
+                addUnique('src/components/ChartPanel.jsx', 'Chart container for analytics visuals');
+            }
+            if (needsCommerce) {
+                addUnique('src/components/ProductGrid.jsx', 'Catalog grid for product browsing');
+                addUnique('src/components/CartPanel.jsx', 'Shopping cart summary and checkout CTA');
+            }
+        } else if (framework === 'react-ts') {
+            if (needsTask) {
+                addUnique('src/components/TodoList.tsx', 'Typed task list with filtering and completion controls');
+                addUnique('src/components/TodoItem.tsx', 'Typed task row with edit/toggle actions');
+                addUnique('src/hooks/useLocalStorage.ts', 'Typed localStorage hook for persistent task state');
+            }
+            if (needsAuth) {
+                addUnique('src/components/LoginForm.tsx', 'Typed login form with validation and submit handling');
+                addUnique('src/context/AuthContext.tsx', 'Typed authentication context and session state');
+            }
+            if (needsDashboard) {
+                addUnique('src/components/KpiCard.tsx', 'Typed KPI/stat card for dashboard metrics');
+                addUnique('src/components/ChartPanel.tsx', 'Typed chart container for analytics visuals');
+            }
+            if (needsCommerce) {
+                addUnique('src/components/ProductGrid.tsx', 'Typed catalog grid for product browsing');
+                addUnique('src/components/CartPanel.tsx', 'Typed shopping cart summary and checkout CTA');
+            }
+        } else if (framework === 'nextjs') {
+            if (needsTask) {
+                addUnique('app/components/TodoList.tsx', 'Task list with filtering and completion controls');
+                addUnique('app/components/TodoItem.tsx', 'Single task row with edit/toggle actions');
+                addUnique('app/lib/storage.ts', 'Client-side persistence helpers for tasks');
+            }
+            if (needsAuth) {
+                addUnique('app/components/LoginForm.tsx', 'Login form UI for account access');
+                addUnique('app/context/AuthContext.tsx', 'Authentication context provider for client state');
+            }
+            if (needsDashboard) {
+                addUnique('app/components/KpiCard.tsx', 'KPI/stat card for dashboard metrics');
+                addUnique('app/components/ChartPanel.tsx', 'Chart container for analytics visuals');
+            }
+            if (needsCommerce) {
+                addUnique('app/components/ProductGrid.tsx', 'Catalog grid for product browsing');
+                addUnique('app/components/CartPanel.tsx', 'Cart summary panel with checkout CTA');
+            }
+        }
+
+        return out;
     }
 
     _normalizePlan(result, requirements) {

@@ -29,7 +29,7 @@ function getAi() {
     return aiSingleton;
 }
 
-const { model, maxTokensDefault, temperature } = config.llm.gemini;
+const { model, temperature } = config.llm.gemini;
 
 export class GeminiProvider extends BaseLLMProvider {
     constructor() {
@@ -49,10 +49,12 @@ export class GeminiProvider extends BaseLLMProvider {
 
         const genConfig = {
             systemInstruction: systemPrompt,
-            maxOutputTokens: options.maxTokens || maxTokensDefault,
             temperature: options.temperature ?? temperature,
             ...(options.responseMimeType ? { responseMimeType: options.responseMimeType } : {}),
         };
+        if (typeof options.maxTokens === 'number') {
+            genConfig.maxOutputTokens = options.maxTokens;
+        }
 
         if (options.responseMimeType === 'application/json') {
             genConfig.thinkingConfig = { thinkingBudget: 0 };
@@ -78,8 +80,8 @@ export class GeminiProvider extends BaseLLMProvider {
             contents: prompt,
             config: {
                 systemInstruction: systemPrompt,
-                maxOutputTokens: options.maxTokens || maxTokensDefault,
                 temperature: options.temperature ?? temperature,
+                ...(typeof options.maxTokens === 'number' ? { maxOutputTokens: options.maxTokens } : {}),
             },
         });
 
@@ -106,10 +108,12 @@ export class GeminiProvider extends BaseLLMProvider {
 
         const fixConfig = {
             systemInstruction: systemPrompt,
-            maxOutputTokens: options.maxTokens || maxTokensDefault,
             temperature: options.temperature ?? temperature,
             ...(options.responseMimeType ? { responseMimeType: options.responseMimeType } : {}),
         };
+        if (typeof options.maxTokens === 'number') {
+            fixConfig.maxOutputTokens = options.maxTokens;
+        }
 
         if (options.responseMimeType === 'application/json') {
             fixConfig.thinkingConfig = { thinkingBudget: 0 };

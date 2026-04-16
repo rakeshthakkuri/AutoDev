@@ -131,7 +131,7 @@ RULES:
 - Ensure all files have a clear purpose.
 - For landing-page projects, include a structure that supports sectioned storytelling and conversion.
 - Ensure designSystem values are token-ready (color, type, spacing, radius, shadow, motion), not only a single brand color.
-- Output ONLY the JSON object. You may wrap it in a markdown code block; we will strip the fence and parse.`;
+- Output ONLY the JSON object.`;
 
 // ─── Framework-Specific Code Generator Prompts ──────────────────────────────
 const FRAMEWORK_PROMPTS = {

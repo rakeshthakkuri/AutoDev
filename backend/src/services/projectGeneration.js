@@ -2,7 +2,7 @@ import path from 'path';
 import crypto from 'crypto';
 import config from '../config.js';
 import logger from './logger.js';
-import { generateCompletionStream, buildCodeGenPrompt, getMaxTokens } from './llm.js';
+import { generateCompletionStream, buildCodeGenPrompt } from './llm.js';
 import { CodeValidator } from './validator.js';
 import { RetryHandler } from './retry.js';
 import { AgentFixer } from './agentFixer.js';
@@ -380,8 +380,6 @@ export class ProjectGenerationService {
             planFiles: planFiles || []
         });
 
-        const maxTokens = getMaxTokens(filePath, requirements.complexity);
-
         const generateFunc = async (p) => {
             try {
                 const startTime = Date.now();
@@ -391,7 +389,6 @@ export class ProjectGenerationService {
                 const streamPromise = generateCompletionStream(
                     p,
                     {
-                        maxTokens,
                         temperature: 0.2,
                         systemPrompt: "You are a professional code generator. Output ONLY raw code for the requested file. NO explanations, NO markdown code fences, NO conversational text, NO backticks around URLs or attributes."
                     },

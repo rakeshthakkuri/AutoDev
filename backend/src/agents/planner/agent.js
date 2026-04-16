@@ -22,11 +22,19 @@ export class PlannerAgent {
      * Returns state delta with plan and planValidation.
      */
     async createPlan(state) {
-        const { requirements, memory } = state;
+        const { requirements, memory, plan: incomingPlan } = state;
         logger.info('[PlannerAgent] Creating plan', { framework: requirements?.framework });
 
         try {
-            const plan = await this.analysisService.generatePlan(requirements);
+            const canReuseIncomingPlan = !!(
+                incomingPlan
+                && Array.isArray(incomingPlan.files)
+                && incomingPlan.files.length > 0
+                && incomingPlan.isFallback !== true
+            );
+            const plan = canReuseIncomingPlan
+                ? incomingPlan
+                : await this.analysisService.generatePlan(requirements);
 
             // Populate memory with planned files
             if (plan?.files && memory) {
@@ -36,7 +44,13 @@ export class PlannerAgent {
                 if (plan.designSystem) {
                     memory.setDesignSystem(plan.designSystem);
                 }
-                memory.addDecision('planner', 'create_plan', `Created plan with ${plan.files.length} files`);
+                memory.addDecision(
+                    'planner',
+                    'create_plan',
+                    canReuseIncomingPlan
+                        ? `Reused client plan with ${plan.files.length} files`
+                        : `Created plan with ${plan.files.length} files`
+                );
             }
 
             return {

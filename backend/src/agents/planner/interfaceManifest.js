@@ -107,7 +107,6 @@ export async function generateInterfaceManifest(plan, requirements) {
 
     try {
         const raw = await generateCompletion(prompt, {
-            maxTokens: 8192,
             temperature: 0.1,
             responseMimeType: 'application/json',
         });

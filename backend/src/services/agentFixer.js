@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import path from 'path';
-import { generateFix, getMaxTokens } from './llm.js';
+import { generateFix } from './llm.js';
 import { CodeValidator } from './validator.js';
 import logger from './logger.js';
 import config from '../config.js';
@@ -67,17 +67,11 @@ export class AgentFixer {
             });
 
             try {
-                // If errors mention truncation, give the LLM more room to output a full file
-                const providerConfig = config.llm.gemini;
-                const maxTokens = isTruncationError
-                    ? Math.max(getMaxTokens(filePath, 'advanced'), providerConfig.maxTokensLarge)
-                    : getMaxTokens(filePath, 'intermediate');
-
                 let fixedCode = null;
                 const maxLlmRetries = 2;
                 for (let r = 0; r < maxLlmRetries; r++) {
                     try {
-                        fixedCode = await generateFix(fixPrompt, { maxTokens });
+                        fixedCode = await generateFix(fixPrompt);
                         break;
                     } catch (e) {
                         logger.warn(`generateFix retry ${r + 1}/${maxLlmRetries} for ${filePath}: ${e.message}`);

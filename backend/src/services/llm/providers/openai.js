@@ -24,10 +24,23 @@ export class OpenAIProvider extends BaseLLMProvider {
     async generateCompletion(prompt, options = {}) {
         const client = await this._getClient();
         const modelName = options.model || config.llm.openai?.model || 'gpt-4o';
-        const response = await client.chat.completions.create({
+        const messages = [];
+        if (options.systemPrompt) {
+            messages.push({ role: 'system', content: options.systemPrompt });
+        }
+        messages.push({ role: 'user', content: prompt });
+        const request = {
             model: modelName,
-            messages: [{ role: 'user', content: prompt }],
-            max_tokens: options.maxTokens || 8192,
+            messages,
+        };
+        if (typeof options.maxTokens === 'number') {
+            request.max_tokens = options.maxTokens;
+        }
+        if (options.responseMimeType === 'application/json') {
+            request.response_format = { type: 'json_object' };
+        }
+        const response = await client.chat.completions.create({
+            ...request,
         });
         const text = response.choices[0].message.content;
         logger.debug('OpenAI completion', { length: text?.length });
@@ -37,11 +50,16 @@ export class OpenAIProvider extends BaseLLMProvider {
     async generateCompletionStream(prompt, options = {}, onChunk) {
         const client = await this._getClient();
         const modelName = options.model || config.llm.openai?.model || 'gpt-4o';
+        const messages = [];
+        if (options.systemPrompt) {
+            messages.push({ role: 'system', content: options.systemPrompt });
+        }
+        messages.push({ role: 'user', content: prompt });
         const stream = await client.chat.completions.create({
             model: modelName,
-            messages: [{ role: 'user', content: prompt }],
+            messages,
             stream: true,
-            max_tokens: options.maxTokens || 8192,
+            ...(typeof options.maxTokens === 'number' ? { max_tokens: options.maxTokens } : {}),
         });
         let fullText = '';
         for await (const chunk of stream) {

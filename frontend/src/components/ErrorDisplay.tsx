@@ -29,18 +29,18 @@ export default function ErrorDisplay({ error, onRetry, onDismiss }: ErrorDisplay
   const getSuggestions = (code?: string) => {
     if (!code) {
       return [
-        'Check if the backend server is running on port 5001',
+        'Check if the backend server is reachable',
         'Verify your network connection',
         'Check browser console for more details'
       ];
     }
-    
+
     switch (code) {
       case 'NETWORK_ERROR':
         return [
-          'Ensure the backend is running: `cd backend && npm run dev`',
-          'Check if the server is accessible at http://localhost:5001',
-          'Verify CORS settings if accessing from a different origin'
+          'Check if the backend server is reachable',
+          'Verify your network connection',
+          'Check browser console for CORS or network errors'
         ];
       case 'MODEL_LOAD_ERROR':
         return [

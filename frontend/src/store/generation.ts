@@ -9,7 +9,7 @@ import type {
   FixingFileState,
   GenerationMetrics,
 } from '../types';
-import { getHealth, analyzePrompt, getPlan, generateProjectStream } from '../services/api';
+import { getHealth, analyzePrompt, getPlan, generateProjectStream, API_URL } from '../services/api';
 
 // ─── Generation state (Zustand store shape) ───────────────────────────────────
 
@@ -126,7 +126,7 @@ export const GenerationStore = create<GenerationState>((set, get) => {
         const ok = await getHealth(signal);
         if (!ok) {
           set({ backendConnected: false });
-          throw new Error('Backend server is not responding. Please ensure the server is running on port 5001.');
+          throw new Error(`Backend server is not responding. Please ensure the server is reachable at ${API_URL}.`);
         }
         set({ backendConnected: true });
 
@@ -285,7 +285,7 @@ export const GenerationStore = create<GenerationState>((set, get) => {
 
         if (error instanceof Error) {
           if (error.message?.includes('Network Error') || error.message?.includes('fetch')) {
-            errorMessage = 'Cannot connect to backend server. Please ensure the server is running on http://localhost:5001';
+            errorMessage = `Cannot connect to backend server. Please ensure the server is reachable at ${API_URL}.`;
           } else if (error.message?.includes('timeout') || error.name === 'AbortError') {
             errorMessage = 'Request timed out. The backend server may be overloaded.';
             errorCode = 'TIMEOUT_ERROR';

@@ -3,7 +3,7 @@ import { GenerationStore } from '../store/generation';
 import { AlertCircle } from 'lucide-react';
 
 /**
- * Shows a slim banner when the backend (port 5001) is not reachable.
+ * Shows a slim banner when the backend is not reachable.
  * Relies on the store's health-check-based `backendConnected` state.
  */
 export default function BackendConnectionBanner() {

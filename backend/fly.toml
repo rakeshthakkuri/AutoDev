@@ -15,7 +15,6 @@ primary_region = 'bom'
 
 [processes]
   app = 'npm start'
-  worker = 'npm run worker'
 
 [http_service]
   internal_port = 5001

@@ -47,6 +47,8 @@ export default function GenerationPage() {
     backendConnected,
     checkHealth,
     selectedFramework,
+    providerRetry,
+    generationDegraded,
   } = GenerationStore();
 
   const effectivePrompt = currentPrompt || lastPrompt;
@@ -154,6 +156,8 @@ export default function GenerationPage() {
         files={files}
         streamingFile={streamingFile}
         onCancel={cancelGeneration}
+        providerRetry={providerRetry}
+        generationDegraded={generationDegraded}
       />
 
       {Object.keys(fileErrors).length > 0 && (

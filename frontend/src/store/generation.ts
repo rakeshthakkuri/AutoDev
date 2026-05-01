@@ -13,6 +13,15 @@ import { getHealth, analyzePrompt, getPlan, generateProjectStream, API_URL } fro
 
 // ─── Generation state (Zustand store shape) ───────────────────────────────────
 
+export interface ProviderRetryStatus {
+  provider: string;
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  reason: string;
+  startedAt: number;
+}
+
 interface GenerationState {
   files: Record<string, string>;
   editedFiles: Record<string, string>;
@@ -37,6 +46,10 @@ interface GenerationState {
   selectedFramework: string;
   selectedStyling: string;
   selectedComplexity: string;
+  /** Active LLM provider retry status (cleared on recovery). */
+  providerRetry: ProviderRetryStatus | null;
+  /** Set when total retry-delay crosses the degraded threshold. */
+  generationDegraded: { provider: string; message: string } | null;
   generateProject: (prompt: string) => Promise<void>;
   clearError: () => void;
   retryGeneration: (prompt: string) => Promise<void>;
@@ -85,6 +98,8 @@ export const GenerationStore = create<GenerationState>((set, get) => {
     selectedFramework: 'auto',
     selectedStyling: 'auto',
     selectedComplexity: 'simple',
+    providerRetry: null,
+    generationDegraded: null,
 
     checkHealth: async () => {
       try {
@@ -116,6 +131,8 @@ export const GenerationStore = create<GenerationState>((set, get) => {
         analysisFallbackWarning: null,
         planFallbackWarning: null,
         fixingFiles: {},
+        providerRetry: null,
+        generationDegraded: null,
       });
 
       const abortController = new AbortController();
@@ -223,6 +240,32 @@ export const GenerationStore = create<GenerationState>((set, get) => {
                 console.error(`File generation error for ${d.path}:`, d.error);
                 break;
 
+              case 'provider_retry':
+                set({
+                  providerRetry: {
+                    provider: d.provider as string,
+                    attempt: d.attempt as number,
+                    maxAttempts: d.maxAttempts as number,
+                    delayMs: d.delayMs as number,
+                    reason: (d.reason as string) || 'transient_error',
+                    startedAt: Date.now(),
+                  },
+                });
+                break;
+
+              case 'provider_recovered':
+                set({ providerRetry: null });
+                break;
+
+              case 'generation_degraded':
+                set({
+                  generationDegraded: {
+                    provider: d.provider as string,
+                    message: (d.message as string) || 'Provider is responding slowly — generation may take longer than usual.',
+                  },
+                });
+                break;
+
               case 'generation_complete':
                 set({
                   isGenerating: false,
@@ -233,6 +276,8 @@ export const GenerationStore = create<GenerationState>((set, get) => {
                   streamingFile: null,
                   streamingContent: '',
                   fixingFiles: {},
+                  providerRetry: null,
+                  generationDegraded: null,
                 });
                 if (d.error) {
                   const err = d.error as Record<string, unknown>;
@@ -258,6 +303,8 @@ export const GenerationStore = create<GenerationState>((set, get) => {
                   },
                   streamingFile: null,
                   streamingContent: '',
+                  providerRetry: null,
+                  generationDegraded: null,
                 });
                 break;
             }

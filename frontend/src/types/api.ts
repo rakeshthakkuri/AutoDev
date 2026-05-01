@@ -54,7 +54,30 @@ export type SSEEventType =
   | 'generation_error'
   | 'progress'
   | 'complete'
-  | 'error';
+  | 'error'
+  | 'provider_retry'
+  | 'provider_recovered'
+  | 'generation_degraded';
+
+export interface ProviderRetryEvent {
+  provider: string;
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  reason: string;
+}
+
+export interface ProviderRecoveredEvent {
+  provider: string;
+  attempts: number;
+  totalDelayMs: number;
+}
+
+export interface GenerationDegradedEvent {
+  provider: string;
+  totalRetryDelayMs: number;
+  message: string;
+}
 
 /** Body returned when POST /api/generate responds with 202 Accepted (async job + progress stream). */
 export interface AsyncGenerateResponse {

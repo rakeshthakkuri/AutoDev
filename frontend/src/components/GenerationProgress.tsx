@@ -1,5 +1,6 @@
-import { Loader2, X } from 'lucide-react';
+import { Loader2, X, AlertTriangle, RefreshCw } from 'lucide-react';
 import type { PlannedFile } from '../types';
+import type { ProviderRetryStatus } from '../store/generation';
 
 export interface GenerationProgressProps {
   isGenerating: boolean;
@@ -8,6 +9,8 @@ export interface GenerationProgressProps {
   files: Record<string, string>;
   streamingFile: string | null;
   onCancel: () => void;
+  providerRetry?: ProviderRetryStatus | null;
+  generationDegraded?: { provider: string; message: string } | null;
 }
 
 export default function GenerationProgress({
@@ -17,8 +20,12 @@ export default function GenerationProgress({
   files,
   streamingFile,
   onCancel,
+  providerRetry,
+  generationDegraded,
 }: GenerationProgressProps) {
   if (!isGenerating) return null;
+
+  const retrySeconds = providerRetry ? Math.max(1, Math.round(providerRetry.delayMs / 1000)) : 0;
 
   return (
     <div className="panel-section" aria-live="polite">
@@ -46,6 +53,53 @@ export default function GenerationProgress({
             <span>Generating</span>
           </div>
         </div>
+
+        {providerRetry ? (
+          <div
+            role="status"
+            style={{
+              marginTop: 12,
+              padding: '8px 12px',
+              borderRadius: 6,
+              background: 'rgba(255, 184, 0, 0.08)',
+              border: '1px solid rgba(255, 184, 0, 0.25)',
+              color: '#a36b00',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          >
+            <RefreshCw size={14} className="spin" />
+            <span>
+              Provider <strong>{providerRetry.provider}</strong> is busy — retrying in {retrySeconds}s
+              (attempt {providerRetry.attempt}/{providerRetry.maxAttempts}).
+            </span>
+          </div>
+        ) : null}
+
+        {generationDegraded ? (
+          <div
+            role="status"
+            style={{
+              marginTop: 8,
+              padding: '8px 12px',
+              borderRadius: 6,
+              background: 'rgba(220, 100, 0, 0.08)',
+              border: '1px solid rgba(220, 100, 0, 0.25)',
+              color: '#8a3a00',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          >
+            <AlertTriangle size={14} />
+            <span>{generationDegraded.message}</span>
+          </div>
+        ) : null}
 
         <div className="cancel-container">
           <button type="button" className="cancel-btn" onClick={onCancel} aria-label="Cancel generation">

@@ -67,18 +67,15 @@ export class AgentFixer {
             });
 
             try {
+                // The dispatcher now handles transient retries (~60s budget). We don't
+                // need our own retry loop here. If the call fails it's either a hard
+                // error (auth/etc) or transient retries were already exhausted —
+                // either way, don't burn time on more local retries.
                 let fixedCode = null;
-                const maxLlmRetries = 2;
-                for (let r = 0; r < maxLlmRetries; r++) {
-                    try {
-                        fixedCode = await generateFix(fixPrompt);
-                        break;
-                    } catch (e) {
-                        logger.warn(`generateFix retry ${r + 1}/${maxLlmRetries} for ${filePath}: ${e.message}`);
-                        if (r < maxLlmRetries - 1) {
-                            await new Promise(resolve => setTimeout(resolve, 1000 + r * 1000));
-                        }
-                    }
+                try {
+                    fixedCode = await generateFix(fixPrompt);
+                } catch (e) {
+                    logger.warn(`generateFix failed for ${filePath}: ${e.message}`);
                 }
 
                 if (!fixedCode || fixedCode.trim().length < 10) {
@@ -284,12 +281,11 @@ export class AgentFixer {
      * Build the repair prompt for the LLM.
      */
     _buildFixPrompt({ code, filePath, errors, warnings, userPrompt, contextFiles, importingFiles }) {
-        const isTruncated = errors.some(e =>
-            e.toLowerCase().includes('truncat') || e.toLowerCase().includes('unterminated')
-        );
-        const isDefaultExportError = errors.some(e =>
-            /imported as default|no default export/i.test(e)
-        );
+        const errorBlob = errors.join(' \n ').toLowerCase();
+        const isTruncated = /truncat|unterminated|unexpected end|unexpected eof/i.test(errorBlob);
+        const isDefaultExportError = /imported as default|no default export/i.test(errorBlob);
+        const isUnclosedJsx = /unclosed|unmatched|expected \w+ tag/i.test(errorBlob);
+        const isMissingImport = /not defined|undefined|cannot find/i.test(errorBlob);
 
         let prompt = `The following file was generated for a web project but has validation errors that need to be fixed.
 
@@ -302,10 +298,25 @@ ${errors.map((e, i) => `${i + 1}. ${e}`).join('\n')}
 
         if (isTruncated) {
             prompt += `
-IMPORTANT: This file was truncated (cut off) because the generation exceeded the token limit.
-You MUST output the COMPLETE file from start to finish. Do NOT just output the missing ending.
-If the component is too large, simplify it to fit — keep all core functionality but be more concise.
-Make sure all JSX tags are properly closed, all strings are terminated, all braces/parentheses are matched, and the file ends with a valid export statement.
+TRUNCATION RECOVERY:
+The previous output was truncated mid-file. You MUST output the COMPLETE file from start to finish.
+- Do NOT just output the missing ending — write the WHOLE file again.
+- If the original implementation is too large to fit, SIMPLIFY (fewer sections, shorter copy) but keep all core behavior.
+- Final character of your output MUST close the file cleanly: matched braces/parens/JSX tags, terminated strings, a valid trailing newline.
+`;
+        }
+
+        if (isUnclosedJsx) {
+            prompt += `
+JSX/HTML BALANCE:
+Walk every opening tag and ensure a matching close. Self-closing tags (<img />, <br />, <input />) must end with /> in JSX. Components like <Card> must have </Card>. Do NOT leave any element open.
+`;
+        }
+
+        if (isMissingImport) {
+            prompt += `
+MISSING IMPORTS:
+For every identifier the validator flagged as not defined, either (a) add the correct import at the top of the file (using the project's existing module paths shown in OTHER PROJECT FILES below), or (b) remove the usage. Do NOT silently leave a reference dangling.
 `;
         }
 

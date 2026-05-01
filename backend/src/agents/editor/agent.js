@@ -139,7 +139,7 @@ export class EditorAgent {
                 .replace('{context}', context);
 
             try {
-                const response = await generateCompletion(prompt, 'You are a code editor. Return only the updated file.');
+                const response = await generateCompletion(prompt, { systemPrompt: 'You are a code editor. Return only the updated file. Output ONLY the raw, complete file contents — no markdown fences, no commentary.' });
                 const cleaned = response.replace(/```[\w]*\n?/g, '').replace(/```/g, '').trim();
                 const validation = this.validator.validateFile(cleaned, filePath, framework);
 
@@ -228,7 +228,7 @@ export class EditorAgent {
             .replace('{targetContent}', targetRecord.content);
 
         try {
-            const response = await generateCompletion(prompt, 'You are a code editor. Return only the updated file.');
+            const response = await generateCompletion(prompt, { systemPrompt: 'You are a code editor. Return only the updated file. Output ONLY the raw, complete file contents — no markdown fences, no commentary.' });
             const cleaned = response.replace(/```[\w]*\n?/g, '').replace(/```/g, '').trim();
             const validation = this.validator.validateFile(cleaned, targetPath, framework);
 

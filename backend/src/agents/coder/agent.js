@@ -130,7 +130,17 @@ export class CoderAgent {
                 }));
             }
 
-            // Don't throw — continue to next file
+            // FILE_GENERATION_FAILED for a user-facing file is a hard failure —
+            // propagate so the orchestrator can mark the whole generation failed
+            // and surface a real error instead of silently shipping a partial project.
+            if (err?.code === 'FILE_GENERATION_FAILED') {
+                throw err;
+            }
+
+            // Other errors: continue to next file (best-effort) — these can include
+            // transient network blips that already burned the dispatcher's retry
+            // budget; rather than fail the whole project, we let downstream review
+            // catch the missing file.
             return {
                 currentFileIndex: currentFileIndex + 1,
             };

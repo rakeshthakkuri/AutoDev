@@ -9,6 +9,7 @@ import { AgentFixer } from './agentFixer.js';
 import { getTemplate } from './templates.js';
 import { runGenerationGraphV2 } from '../agents/orchestrator/graph.js';
 import { bundleProject } from './bundler.js';
+import { classifyFile, allowSilentTemplate, fileGenerationError, FILE_ROLE } from './fallbackPolicy.js';
 
 const { maxTotalTimeout: MAX_GENERATION_TIMEOUT_MS, maxFileTimeout } = config.generation;
 
@@ -100,7 +101,7 @@ export class ProjectGenerationService {
      * Generate a complete project with streaming support (agentic orchestration).
      * Uses an orchestrator that runs a state machine and invokes tools (generate_file, validate_project, fix_cross_file).
      */
-    async generateProject({ generationId: passedGenerationId, userPrompt, requirements, plan, onProgress, onFileGenerated, onFileChunk, onError, onPlan, onFileFixing, onFileFixed }) {
+    async generateProject({ generationId: passedGenerationId, userPrompt, requirements, plan, onProgress, onFileGenerated, onFileChunk, onError, onPlan, onFileFixing, onFileFixed, onProviderRetry, onProviderRecovered, onGenerationDegraded }) {
         const startTime = Date.now();
         const generationId = passedGenerationId || crypto.randomUUID();
         const projectId = `project_${crypto.randomUUID().split('-')[0]}`;
@@ -135,6 +136,9 @@ export class ProjectGenerationService {
                 onPlan,
                 onFileFixing,
                 onFileFixed,
+                onProviderRetry,
+                onProviderRecovered,
+                onGenerationDegraded,
             };
 
             logger.info('Using v2 multi-agent pipeline', { generationId });
@@ -267,7 +271,10 @@ export class ProjectGenerationService {
 
             // Hard safety net for ALL file types:
             // 1) If still invalid after repair, run one strict full-file recovery generation.
-            // 2) If still invalid, force deterministic template fallback.
+            // 2) If still invalid: policy-driven decision —
+            //    INFRA      → silent deterministic template fallback (acceptable).
+            //    USER_FACING → throw a typed error so the orchestrator can surface
+            //                  a real failure to the user instead of shipping a stub.
             if (!finalValidation.isValid) {
                 logger.warn(`File ${filePath} still invalid after fixes; attempting strict recovery generation`);
                 const recoveryResult = await this._generateFile({
@@ -284,28 +291,35 @@ export class ProjectGenerationService {
             }
 
             if (!finalValidation.isValid) {
-                logger.warn(`File ${filePath} still invalid after recovery; forcing template fallback`);
-                const framework = requirements.framework || config.defaultFramework;
-                const safeCode = getTemplate(filePath, {
-                    projectType: requirements.projectType,
-                    framework,
-                    stylingFramework: requirements.stylingFramework,
-                    title: 'My Website',
-                    description: userPrompt.substring(0, 200)
-                });
-
-                const safeValidation = this.validator.validateFile(safeCode, filePath, framework);
-                finalCode = safeValidation.fixedCode || safeCode;
-                finalValidation = {
-                    ...safeValidation,
-                    warnings: [
-                        ...(safeValidation.warnings || []),
-                        'Generation output was invalid after repair/recovery; template fallback used'
-                    ]
-                };
-                await this._writeFile(projectDir, filePath, finalCode);
-                forcedFallback = true;
-                forcedFallbackReason = 'Invalid after repair and recovery; template fallback used';
+                const role = classifyFile(filePath);
+                if (role === FILE_ROLE.INFRA) {
+                    logger.warn(`File ${filePath} still invalid after recovery; using template fallback (infra file)`);
+                    const framework = requirements.framework || config.defaultFramework;
+                    const safeCode = getTemplate(filePath, {
+                        projectType: requirements.projectType,
+                        framework,
+                        stylingFramework: requirements.stylingFramework,
+                        title: 'My Website',
+                        description: userPrompt.substring(0, 200)
+                    });
+                    const safeValidation = this.validator.validateFile(safeCode, filePath, framework);
+                    finalCode = safeValidation.fixedCode || safeCode;
+                    finalValidation = {
+                        ...safeValidation,
+                        warnings: [
+                            ...(safeValidation.warnings || []),
+                            'Generation output was invalid after repair/recovery; template fallback used (infra file)'
+                        ]
+                    };
+                    await this._writeFile(projectDir, filePath, finalCode);
+                    forcedFallback = true;
+                    forcedFallbackReason = 'Invalid after repair and recovery; template fallback used (infra)';
+                } else {
+                    // User-facing — fail loud rather than ship a generic stub.
+                    const reason = (finalValidation.errors || []).slice(0, 3).join('; ') || 'invalid output';
+                    logger.error(`File ${filePath} still invalid after recovery (USER_FACING) — failing loud. Reasons: ${reason}`);
+                    throw fileGenerationError(filePath, reason);
+                }
             }
 
             // Track for inter-file context
@@ -331,37 +345,54 @@ export class ProjectGenerationService {
             }
             onFileGenerated?.(filePayload);
         } catch (error) {
-            logger.error(`Error generating ${filePath}: ${error.message}`);
-            onError?.({ path: filePath, error: error.message, recoverable: true });
-
-            // Fallback to template (absolute last resort)
-            try {
-                const fallbackCode = getTemplate(filePath, {
-                    projectType: requirements.projectType,
-                    framework: requirements.framework,
-                    stylingFramework: requirements.stylingFramework,
-                    title: 'My Website',
-                    description: userPrompt.substring(0, 200)
-                });
-
-                await this._writeFile(projectDir, filePath, fallbackCode);
-                generatedFiles[filePath] = fallbackCode;
-
-                onFileGenerated?.({
-                    path: filePath,
-                    content: fallbackCode,
-                    validation: {
-                        is_valid: true,
-                        errors: [],
-                        warnings: ['Using template fallback due to generation error'],
-                        fixes_applied: []
-                    },
-                    fallback: true,
-                    fallbackReason: 'LLM generation failed; template used as fallback'
-                });
-            } catch (fallbackError) {
-                logger.error(`Fallback failed for ${filePath}: ${fallbackError.message}`);
+            // Re-throw the typed FILE_GENERATION_FAILED so the orchestrator can
+            // record the failure cleanly. For other errors, we still want to
+            // surface them — but for INFRA files we may try a template fallback first.
+            if (error?.code === 'FILE_GENERATION_FAILED') {
+                onError?.({ path: filePath, error: error.message, recoverable: false });
+                throw error;
             }
+
+            logger.error(`Error generating ${filePath}: ${error.message}`);
+
+            const role = classifyFile(filePath);
+            if (role === FILE_ROLE.INFRA) {
+                // Infra-only: try the deterministic template before giving up.
+                onError?.({ path: filePath, error: error.message, recoverable: true });
+                try {
+                    const fallbackCode = getTemplate(filePath, {
+                        projectType: requirements.projectType,
+                        framework: requirements.framework,
+                        stylingFramework: requirements.stylingFramework,
+                        title: 'My Website',
+                        description: userPrompt.substring(0, 200)
+                    });
+
+                    await this._writeFile(projectDir, filePath, fallbackCode);
+                    generatedFiles[filePath] = fallbackCode;
+
+                    onFileGenerated?.({
+                        path: filePath,
+                        content: fallbackCode,
+                        validation: {
+                            is_valid: true,
+                            errors: [],
+                            warnings: ['Using template fallback due to generation error (infra file)'],
+                            fixes_applied: []
+                        },
+                        fallback: true,
+                        fallbackReason: 'LLM generation failed; template used as fallback (infra)'
+                    });
+                    return;
+                } catch (fallbackError) {
+                    logger.error(`Fallback failed for ${filePath}: ${fallbackError.message}`);
+                    throw fileGenerationError(filePath, `LLM failed and template fallback failed: ${fallbackError.message}`);
+                }
+            }
+
+            // User-facing file failed before/inside generate — surface a real error.
+            onError?.({ path: filePath, error: error.message, recoverable: false });
+            throw fileGenerationError(filePath, error.message);
         }
     }
 
@@ -432,16 +463,23 @@ export class ProjectGenerationService {
         if (retryResult.success) {
             code = retryResult.code;
         } else {
-            logger.warn(`All retries failed for ${filePath}, using template fallback`);
-            code = getTemplate(filePath, {
-                projectType: requirements.projectType,
-                framework: requirements.framework,
-                stylingFramework: requirements.stylingFramework,
-                title: 'My Website',
-                description: userPrompt.substring(0, 200)
-            });
-            fallback = true;
-            fallbackReason = `LLM generation failed after ${config.generation.maxRetries} retries`;
+            const role = classifyFile(filePath);
+            if (role === FILE_ROLE.INFRA) {
+                logger.warn(`All retries failed for ${filePath}, using template fallback (infra file)`);
+                code = getTemplate(filePath, {
+                    projectType: requirements.projectType,
+                    framework: requirements.framework,
+                    stylingFramework: requirements.stylingFramework,
+                    title: 'My Website',
+                    description: userPrompt.substring(0, 200)
+                });
+                fallback = true;
+                fallbackReason = `LLM generation failed after ${config.generation.maxRetries} retries (infra: template used)`;
+            } else {
+                // User-facing — surface the failure rather than silently substitute a template.
+                logger.error(`All retries failed for ${filePath} (USER_FACING) — failing loud`);
+                throw fileGenerationError(filePath, `LLM generation failed after ${config.generation.maxRetries} retries`);
+            }
         }
 
         // Validate and auto-fix

@@ -6,6 +6,7 @@
 import { Annotation, StateGraph, START, END } from '@langchain/langgraph';
 import config from '../../config.js';
 import logger from '../../services/logger.js';
+import { runWithRetryHooks } from '../../services/llm.js';
 import { ProjectMemory } from '../shared/memory.js';
 import { AgentEventEmitter } from '../shared/events.js';
 import { PlannerAgent } from '../planner/agent.js';
@@ -365,17 +366,75 @@ export async function runGenerationGraphV2(services, params) {
     const fileCount = files.length;
     const recursionLimit = Math.max(75, fileCount * 4 + 30);
 
+    // Track total retry-delay across the whole generation so we can fire
+    // generation_degraded once when things have been slow for a while.
+    let totalRetryDelayMs = 0;
+    let degradedFired = false;
+    const DEGRADED_THRESHOLD_MS = 30_000;
+
+    const retryHooks = {
+        onRetry: ({ attempt, maxAttempts, delayMs, error, provider }) => {
+            totalRetryDelayMs += delayMs;
+            emitter?.emitProviderRetry?.({
+                provider,
+                attempt,
+                maxAttempts,
+                delayMs,
+                reason: error?.message || 'transient_error',
+            });
+            if (!degradedFired && totalRetryDelayMs >= DEGRADED_THRESHOLD_MS) {
+                degradedFired = true;
+                emitter?.emitGenerationDegraded?.({
+                    provider,
+                    totalRetryDelayMs,
+                    message: 'Provider is responding slowly — generation may take longer than usual.',
+                });
+            }
+        },
+        onRecovered: ({ attempt, totalDelayMs, provider }) => {
+            emitter?.emitProviderRecovered?.({ provider, attempts: attempt, totalDelayMs });
+        },
+    };
+
     let finalState;
     try {
-        finalState = await graph.invoke(initialState, {
+        finalState = await runWithRetryHooks(retryHooks, () => graph.invoke(initialState, {
             configurable: { services },
             recursionLimit,
-        });
+        }));
     } catch (err) {
-        logger.error(`[Orchestrator v2] Error: ${err.message}`, { generationId });
+        // Surface a clean, user-facing error to the SSE stream.
+        const isPlannerFailure = err?.code === 'PLAN_INVALID_AFTER_REVISIONS'
+            || err?.code === 'PLAN_GENERATION_FAILED'
+            || /plan/i.test(err?.message || '');
+        const isFileFailure = err?.code === 'FILE_GENERATION_FAILED';
+
+        let userMessage;
+        if (isPlannerFailure) {
+            userMessage = `Could not produce a valid project plan. ${err.message}. Try rephrasing your prompt or simplifying the request.`;
+        } else if (isFileFailure) {
+            userMessage = err.message;
+        } else {
+            userMessage = err.message;
+        }
+
+        logger.error(`[Orchestrator v2] Error: ${err.message}`, {
+            generationId,
+            isPlannerFailure,
+            isFileFailure,
+            errorCode: err.code,
+        });
+        emitter?.emitFileError?.({
+            phase: isPlannerFailure ? 'planning' : isFileFailure ? 'generating' : 'unknown',
+            error: userMessage,
+            recoverable: false,
+            filePath: err?.filePath,
+        });
+
         return {
             success: false,
-            error: err.message,
+            error: userMessage,
+            errorCode: err.code,
             duration: (Date.now() - startTime) / 1000,
             stepsUsed: 0,
             quality: 'failed',

@@ -174,6 +174,18 @@ export class GenerationController {
                     if (cancelled) return;
                     sendSSE(res, 'file_fixed', fixedData);
                 },
+                onProviderRetry: (data) => {
+                    if (cancelled) return;
+                    sendSSE(res, 'provider_retry', data);
+                },
+                onProviderRecovered: (data) => {
+                    if (cancelled) return;
+                    sendSSE(res, 'provider_recovered', data);
+                },
+                onGenerationDegraded: (data) => {
+                    if (cancelled) return;
+                    sendSSE(res, 'generation_degraded', data);
+                },
             });
 
             if (!cancelled) {

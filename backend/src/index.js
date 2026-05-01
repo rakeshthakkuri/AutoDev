@@ -13,7 +13,7 @@ import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { deprecationApiHeaders } from './middleware/deprecationApi.js';
 import logger from './services/logger.js';
-import { initializeModel } from './services/llm.js';
+import { llmDispatcher } from './services/llm.js';
 import { AnalysisService } from './services/analysis.js';
 import { ProjectGenerationService } from './services/projectGeneration.js';
 import { createStorageService } from './services/storage/index.js';
@@ -186,9 +186,9 @@ if (!process.env.BUILD_CHECK) {
     server.listen(PORT, async () => {
         logger.info(`Backend v2.0 running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
         try {
-            await initializeModel();
+            llmDispatcher.init();
         } catch (e) {
-            logger.error('Failed to initialize model on startup', e);
+            logger.error('Failed to initialize LLM provider on startup', e);
         }
         startScheduler(storageService);
     });

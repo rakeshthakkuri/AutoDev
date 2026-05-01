@@ -58,6 +58,23 @@ export class AgentEventEmitter {
         this._callbacks.onError?.(errorData);
     }
 
+    // ── Provider-retry events (LLM transient retries) ──
+
+    emitProviderRetry(data) {
+        this._emit('provider_retry', data);
+        this._callbacks.onProviderRetry?.(data);
+    }
+
+    emitProviderRecovered(data) {
+        this._emit('provider_recovered', data);
+        this._callbacks.onProviderRecovered?.(data);
+    }
+
+    emitGenerationDegraded(data) {
+        this._emit('generation_degraded', data);
+        this._callbacks.onGenerationDegraded?.(data);
+    }
+
     // ── Edit events ──
 
     emitEditStart(editData) {

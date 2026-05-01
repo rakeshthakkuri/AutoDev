@@ -54,6 +54,13 @@ FILE PLAN RULES
    For multi-page websites: create one component per PAGE, shared layout/nav/footer components,
    and a styles file. Do NOT create separate files for every section within a page.
 
+   FILES TO NEVER PLAN (these are generated/managed automatically — do NOT include them):
+   • Lockfiles: package-lock.json, yarn.lock, pnpm-lock.yaml
+   • Build artifacts: dist/, build/, node_modules/, .next/
+   • Editor/IDE files: .vscode/, .idea/
+   • CI/git infra: .github/, .gitlab-ci.yml
+   These will cause generation to fail loudly. Omit them from the plan.
+
 4. STYLING-SPECIFIC FILE PLANNING
    • When styling is "css-modules": for each component with visual styling, plan a
      corresponding {ComponentName}.module.css file in the same directory.
@@ -164,14 +171,19 @@ OUTPUT JSON SCHEMA
   }
 }
 
-Return ONLY this JSON structure. You may wrap it in a markdown code block if needed; we will strip the fence and parse.`;
+OUTPUT REQUIREMENTS — non-negotiable:
+• Output ONLY this JSON object. The very first character of your response MUST be {.
+• The very last character of your response MUST be }.
+• No markdown fences (no \`\`\`json), no commentary, no headings, no trailing prose.
+• All keys and string values must be double-quoted; no trailing commas; no comments.
+• If you cannot produce a valid plan, output {"files":[]} — but never output prose.`;
 
 // ---------------------------------------------------------------------------
 // V1 Revision prompt (unchanged)
 // ---------------------------------------------------------------------------
-export const PLAN_REVISION_PROMPT = `You previously generated a project plan that has the following issues:
+export const PLAN_REVISION_PROMPT = `You previously generated a project plan that has the following issues. Produce a corrected plan.
 
-VALIDATION ERRORS:
+VALIDATION ERRORS (you MUST resolve all of these):
 {errors}
 
 ORIGINAL PLAN:
@@ -183,16 +195,22 @@ USER REQUEST:
 FRAMEWORK: {framework}
 COMPLEXITY: {complexity}
 
-Fix the plan to address ALL validation errors. Rules:
-1. Every file in the plan must have a clear purpose
-2. Import chains must be resolvable (don't reference files not in the plan)
-3. There must be exactly one entry point
-4. File count must be between {minFiles} and {maxFiles}
-5. Follow {framework} conventions for file naming and structure
+REVISION RULES:
+1. Every file MUST have a clear purpose.
+2. Import chains MUST be resolvable — every "imports" entry MUST reference another file in the plan.
+3. The plan MUST include the framework's required entry point.
+4. File count MUST be between {minFiles} and {maxFiles}.
+5. Follow {framework} conventions for file naming and structure.
+6. Preserve the user's intent — do NOT silently change project type or features.
 
-Return the corrected plan as JSON with the same schema:
+OUTPUT REQUIREMENTS — non-negotiable:
+• Output ONLY a single JSON object. First character MUST be {; last MUST be }.
+• No markdown fences (no \`\`\`json), no commentary, no prose.
+• All keys and string values double-quoted; no trailing commas; no comments.
+
+JSON SCHEMA:
 {
-  "files": [{ "path": "...", "purpose": "..." }],
+  "files": [{ "path": "...", "purpose": "...", "exports": [...], "imports": [...], "props": [...] }],
   "techStack": [...],
   "designSystem": { ... }
 }`;

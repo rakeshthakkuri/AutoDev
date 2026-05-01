@@ -502,12 +502,20 @@ export class AnalysisService {
 
         const planSystemPrompt = 'You MUST output ONLY a valid JSON object. NO markdown code fences (NO ```json), NO conversational text, NO explanations. Output MUST start with { and end with }.';
 
-        const maxPlanAttempts = 4;
-        for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
+        // The dispatcher already retries transient errors (~60s budget). We retry
+        // only content failures (no/invalid JSON) here, with a tightened prompt.
+        const MAX_CONTENT_RETRIES = 2;
+        let lastErr = null;
+
+        for (let attempt = 1; attempt <= MAX_CONTENT_RETRIES + 1; attempt++) {
+            const tightenedSystemPrompt = attempt === 1
+                ? planSystemPrompt
+                : `${planSystemPrompt} Your previous response could not be parsed (attempt ${attempt - 1}). Output ONLY a single JSON object — no prose, no fences, no comments.`;
+
             try {
                 const response = await generateCompletion(prompt, {
-                    temperature: 0.1,
-                    systemPrompt: planSystemPrompt,
+                    temperature: 0,
+                    systemPrompt: tightenedSystemPrompt,
                     responseMimeType: 'application/json'
                 });
 
@@ -520,27 +528,22 @@ export class AnalysisService {
                     return normalized;
                 }
 
-                if (attempt < maxPlanAttempts) {
-                    const delayMs = attempt * 1000;
-                    logger.warn(`Plan attempt ${attempt}: no valid JSON, retrying in ${delayMs}ms`);
-                    await new Promise(r => setTimeout(r, delayMs));
-                } else {
-                    logger.warn('Plan: no valid JSON from LLM after retries, using framework-specific fallback');
-                    return this._getPlanFallback(requirements);
-                }
+                lastErr = new Error('Planner returned no valid file list');
+                logger.warn(`Plan attempt ${attempt}: no valid JSON / no files, retrying with stricter prompt`);
             } catch (error) {
-                if (attempt < maxPlanAttempts) {
-                    const delayMs = attempt * 1000;
-                    logger.warn(`Plan error (attempt ${attempt}): ${error.message}, retrying in ${delayMs}ms`);
-                    await new Promise(r => setTimeout(r, delayMs));
-                } else {
-                    logger.warn(`Plan error: ${error.message}, using fallback`);
-                    return this._getPlanFallback(requirements);
-                }
+                lastErr = error;
+                logger.warn(`Plan attempt ${attempt} error: ${error.message}`);
             }
         }
 
-        return this._getPlanFallback(requirements);
+        // All content-retry attempts exhausted. Fail loud — caller (PlannerAgent)
+        // will translate this into a real user-facing error rather than silently
+        // shipping a generic framework template.
+        const reason = lastErr?.message || 'unknown';
+        logger.error(`Plan generation failed after retries: ${reason}`);
+        const err = new Error(`Could not produce a valid plan: ${reason}`);
+        err.code = 'PLAN_GENERATION_FAILED';
+        throw err;
     }
 
     // ─── Private Methods ────────────────────────────────────────────────────
@@ -1039,6 +1042,34 @@ export class AnalysisService {
                 ? { path: f, purpose: '' }
                 : { path: f.path || f.name, purpose: f.purpose || '' }
         );
+
+        // Drop files the system manages itself (lockfiles, build artifacts, IDE/CI infra).
+        // Generating these via LLM is a recipe for fallback churn — they're either
+        // produced by the package manager / build tool or irrelevant to the project.
+        const FORBIDDEN_PATTERNS = [
+            /(^|\/)package-lock\.json$/,
+            /(^|\/)yarn\.lock$/,
+            /(^|\/)pnpm-lock\.yaml$/,
+            /^node_modules\//,
+            /^dist\//,
+            /^build\//,
+            /^\.next\//,
+            /^\.vscode\//,
+            /^\.idea\//,
+            /^\.github\//,
+            /(^|\/)\.gitlab-ci\.yml$/,
+        ];
+        const dropped = [];
+        files = files.filter(f => {
+            if (FORBIDDEN_PATTERNS.some(re => re.test(f.path))) {
+                dropped.push(f.path);
+                return false;
+            }
+            return true;
+        });
+        if (dropped.length > 0) {
+            logger.info('Dropped forbidden files from plan', { dropped });
+        }
 
         // Ensure entry points exist based on framework
         files = this._ensureEntryPoints(files, framework);

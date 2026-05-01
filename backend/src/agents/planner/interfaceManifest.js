@@ -107,8 +107,9 @@ export async function generateInterfaceManifest(plan, requirements) {
 
     try {
         const raw = await generateCompletion(prompt, {
-            temperature: 0.1,
+            temperature: 0,
             responseMimeType: 'application/json',
+            systemPrompt: 'You output ONLY a single valid JSON object. First character MUST be { and last MUST be }. No markdown fences, no comments, no prose, no trailing commas.',
         });
 
         const manifest = parseManifest(raw, filePaths);

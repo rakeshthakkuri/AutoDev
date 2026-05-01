@@ -9,24 +9,29 @@ import logger from '../../services/logger.js';
  * Route after plan validation.
  * - Valid → emit plan and start generating
  * - Invalid + revisions left → revise plan
- * - Invalid + no revisions → proceed anyway (best-effort)
+ * - Invalid + no revisions → fail loud (no silent imperfect-plan fallthrough)
  */
 export function routeAfterPlanValidation(state) {
-    const { planValidation, planRevisions } = state;
+    const { planValidation, planRevisions = 0 } = state;
 
     if (planValidation?.valid) {
         logger.info('[Router] Plan valid → emit_plan');
         return 'emit_plan';
     }
 
-    if (planRevisions < 2) {
+    const MAX_PLAN_REVISIONS = 3;
+    if (planRevisions < MAX_PLAN_REVISIONS) {
         logger.info(`[Router] Plan invalid (${planValidation?.errors?.length} errors) → revise_plan`);
         return 'revise_plan';
     }
 
-    // Proceed with imperfect plan rather than fail
-    logger.warn('[Router] Plan still invalid after 2 revisions → emit_plan (best-effort)');
-    return 'emit_plan';
+    // Out of revision budget — surface a real error rather than ship a bad plan.
+    const reason = (planValidation?.errors || []).slice(0, 3).map(e => e.message).join('; ');
+    logger.error(`[Router] Plan still invalid after ${MAX_PLAN_REVISIONS} revisions → failing generation. Reasons: ${reason}`);
+    const err = new Error(`Could not produce a valid project plan after ${MAX_PLAN_REVISIONS} revisions. Last reasons: ${reason || 'unknown'}`);
+    err.code = 'PLAN_INVALID_AFTER_REVISIONS';
+    err.planValidation = planValidation;
+    throw err;
 }
 
 /**

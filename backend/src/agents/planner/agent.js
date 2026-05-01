@@ -1,13 +1,82 @@
 import logger from '../../services/logger.js';
-import { generateCompletion } from '../../services/llm.js';
+import { generateCompletion, ContentLLMError } from '../../services/llm.js';
 import { validatePlan as validatePlanStructure, FILE_COUNT_BOUNDS } from './validators.js';
 import { generateInterfaceManifest } from './interfaceManifest.js';
 import { PLAN_REVISION_PROMPT } from './prompts.js';
 import { createError } from '../shared/errors.js';
 
+const STRICT_JSON_SYSTEM_PROMPT =
+    'You are a project planning agent. You MUST output ONLY a single valid JSON object. ' +
+    'NO markdown code fences (no ```json), NO comments, NO conversational text, NO trailing commas. ' +
+    'Output MUST start with { and end with }. Every key and string must be double-quoted.';
+
+const MAX_CONTENT_RETRIES = 2; // beyond the initial attempt → 3 total tries on bad-JSON
+
+function parseJsonResponse(raw) {
+    if (typeof raw !== 'string') {
+        throw new ContentLLMError('LLM returned non-string response', { provider: 'planner' });
+    }
+    // Strip common LLM JSON wrappers
+    const cleaned = raw
+        .replace(/^[\s﻿]*```(?:json)?\s*/i, '')
+        .replace(/```\s*$/i, '')
+        .trim();
+
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    const candidate = firstBrace >= 0 && lastBrace > firstBrace
+        ? cleaned.slice(firstBrace, lastBrace + 1)
+        : cleaned;
+
+    try {
+        return JSON.parse(candidate);
+    } catch (parseErr) {
+        throw new ContentLLMError(`Plan response is not valid JSON: ${parseErr.message}`, {
+            provider: 'planner',
+            raw,
+            parseError: parseErr,
+        });
+    }
+}
+
+/**
+ * Run a JSON-returning LLM call with content-error retries (separate from the
+ * dispatcher's transient retries). On each retry we tighten the system prompt
+ * to remind the LLM that ONLY JSON is acceptable.
+ */
+async function callWithJsonRetry(buildPrompt) {
+    let lastErr = null;
+    let baseSystemPrompt = STRICT_JSON_SYSTEM_PROMPT;
+    for (let attempt = 0; attempt <= MAX_CONTENT_RETRIES; attempt++) {
+        const systemPrompt = attempt === 0
+            ? baseSystemPrompt
+            : `${baseSystemPrompt} Your previous response could not be parsed (attempt ${attempt}). Output ONLY a single JSON object — no prose, no fences.`;
+
+        try {
+            const raw = await generateCompletion(buildPrompt(attempt), {
+                systemPrompt,
+                temperature: 0,
+                responseMimeType: 'application/json',
+            });
+            return parseJsonResponse(raw);
+        } catch (err) {
+            lastErr = err;
+            if (!(err instanceof ContentLLMError)) throw err; // hard / transient already exhausted by dispatcher
+            logger.warn('[PlannerAgent] JSON parse failed — retrying with tighter system prompt', {
+                attempt: attempt + 1,
+                maxAttempts: MAX_CONTENT_RETRIES + 1,
+                error: err.message,
+            });
+        }
+    }
+    throw lastErr;
+}
+
 /**
  * Planner Agent — creates and validates project file plans.
- * Wraps the existing AnalysisService with plan quality gates and revision logic.
+ * Wraps the AnalysisService with quality gates and revision logic. Failures
+ * are surfaced loudly so the orchestrator can return a real error to the user
+ * instead of silently shipping a bad plan.
  */
 export class PlannerAgent {
     /**
@@ -18,23 +87,34 @@ export class PlannerAgent {
     }
 
     /**
-     * Create an initial plan using the existing analysis service.
-     * Returns state delta with plan and planValidation.
+     * Create an initial plan using the analysis service.
+     * Returns state delta with plan and planRevisions.
      */
     async createPlan(state) {
         const { requirements, memory, plan: incomingPlan } = state;
         logger.info('[PlannerAgent] Creating plan', { framework: requirements?.framework });
 
+        // Reject incoming client plans that came from a previous fallback path.
+        const isClientFallback = !!(incomingPlan && (incomingPlan.isFallback || incomingPlan._fallbackOrigin));
+        const canReuseIncomingPlan = !!(
+            incomingPlan
+            && Array.isArray(incomingPlan.files)
+            && incomingPlan.files.length > 0
+            && !isClientFallback
+        );
+
+        if (isClientFallback) {
+            logger.warn('[PlannerAgent] Discarding client-supplied fallback plan; re-planning from scratch');
+        }
+
         try {
-            const canReuseIncomingPlan = !!(
-                incomingPlan
-                && Array.isArray(incomingPlan.files)
-                && incomingPlan.files.length > 0
-                && incomingPlan.isFallback !== true
-            );
             const plan = canReuseIncomingPlan
                 ? incomingPlan
                 : await this.analysisService.generatePlan(requirements);
+
+            if (!plan || !Array.isArray(plan.files) || plan.files.length === 0) {
+                throw new Error('Planner returned a plan with no files');
+            }
 
             // Populate memory with planned files
             if (plan?.files && memory) {
@@ -66,13 +146,13 @@ export class PlannerAgent {
                     message: err.message,
                 }));
             }
+            // Fail loud — orchestrator catches and returns a real error.
             throw err;
         }
     }
 
     /**
-     * Validate an existing plan.
-     * Returns state delta with planValidation result.
+     * Validate an existing plan. Returns state delta with planValidation result.
      */
     async validatePlan(state) {
         const { plan, requirements, memory } = state;
@@ -120,8 +200,8 @@ export class PlannerAgent {
     }
 
     /**
-     * Revise a plan based on validation errors.
-     * Calls the LLM with the original plan + errors to produce a fixed version.
+     * Revise a plan based on validation errors. Failures propagate — the
+     * orchestrator's router will decide whether to surface the error.
      */
     async revisePlan(state) {
         const { plan, requirements, planValidation, planRevisions = 0, userPrompt, memory } = state;
@@ -135,7 +215,7 @@ export class PlannerAgent {
             .map(e => `- ${e.type}: ${e.message}`)
             .join('\n');
 
-        const prompt = PLAN_REVISION_PROMPT
+        const buildPrompt = () => PLAN_REVISION_PROMPT
             .replace('{errors}', errorsText)
             .replace('{plan}', JSON.stringify(plan, null, 2))
             .replace('{userPrompt}', userPrompt || '')
@@ -145,12 +225,14 @@ export class PlannerAgent {
             .replace('{maxFiles}', String(maxFiles));
 
         try {
-            const response = await generateCompletion(prompt, 'You are a project planning agent. Return only valid JSON.');
-            const revised = JSON.parse(response.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
+            const revised = await callWithJsonRetry(buildPrompt);
+
+            if (!revised || !Array.isArray(revised.files) || revised.files.length === 0) {
+                throw new ContentLLMError('Plan revision returned no files', { provider: 'planner', raw: JSON.stringify(revised) });
+            }
 
             // Update memory with revised plan
             if (memory && revised?.files) {
-                // Clear old planned files and add new ones
                 for (const [path, record] of memory.files) {
                     if (record.status === 'planned') memory.files.delete(path);
                 }
@@ -176,10 +258,9 @@ export class PlannerAgent {
                     message: `Plan revision failed: ${err.message}`,
                 }));
             }
-            // Return the original plan — proceed with imperfect plan
-            return {
-                planRevisions: planRevisions + 1,
-            };
+            // Propagate — the orchestrator router will decide whether to retry the
+            // revision (within budget) or fail the whole generation.
+            throw err;
         }
     }
 }

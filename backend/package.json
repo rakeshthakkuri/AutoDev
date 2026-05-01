@@ -48,7 +48,6 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "lru-cache": "^11.2.5",
-    "openai": "^6.34.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {

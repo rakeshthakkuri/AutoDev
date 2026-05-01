@@ -24,10 +24,13 @@ LANDING PAGE QUALITY BENCHMARK (apply when projectType is "landing-page"):
 
 // ─── Analyzer Prompt ─────────────────────────────────────────────────────────
 export const ANALYZER_PROMPT = `Analyze the user's web project request and provide a detailed technical specification.
-CRITICAL: You MUST output ONLY a valid JSON object. 
-- NO markdown code fences (e.g., NO \`\`\`json).
-- NO conversational filler or explanations.
+CRITICAL OUTPUT RULES — non-negotiable:
+- Output ONLY a single valid JSON object.
+- The very first character MUST be { and the very last character MUST be }.
+- NO markdown code fences (no \`\`\`json).
+- NO conversational filler, headings, or explanations.
 - NO text before or after the JSON object.
+- All keys and string values double-quoted; no trailing commas; no comments.
 
 User request: "{prompt}"
 {frameworkHint}{stylingHint}
@@ -543,11 +546,17 @@ export const getMaxTokens = (filePath, complexity) => {
     return isAdvanced ? 6144 : 4096;
 };
 
-// MIGRATION SHIM: implementations live in src/services/llm/ (router + providers).
+// MIGRATION SHIM: implementations live in src/services/llm/ (single pinned provider).
 export {
     generateCompletion,
     generateCompletionStream,
     generateFix,
     initializeModel,
-    llmRouter,
+    runWithRetryHooks,
+    getActiveProvider,
+    llmDispatcher,
+    LLMError,
+    TransientLLMError,
+    HardLLMError,
+    ContentLLMError,
 } from './llm/index.js';

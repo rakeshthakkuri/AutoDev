@@ -34,8 +34,20 @@ FILE PLAN RULES
    • "imports" — array of PATHS of other project files this file imports from
                   (e.g. ["src/components/Button.jsx", "src/utils/cn.js"]).
                   Use [] for files with no local imports. Do NOT list npm packages here.
-   • "props"   — (components only) array of prop names the component accepts.
-                  Omit or use [] for non-component files.
+   • "props"   — (components only) ARRAY OF TYPED PROP DESCRIPTORS (NOT just names).
+                  Each prop is an object: { "name": string, "type": string, "required": boolean, "description": string }
+                  Example: [
+                    { "name": "tasks", "type": "Task[]", "required": true, "description": "list of task items to render" },
+                    { "name": "onToggle", "type": "(id: string) => void", "required": true, "description": "called when a task is toggled" },
+                    { "name": "onDelete", "type": "(id: string) => void", "required": true, "description": "called when a task is deleted" }
+                  ]
+                  Use [] for non-component files or stateless leaf components with no inputs.
+   • "owns_state" — (components only) boolean. true ONLY for components that should manage their
+                    own React state (typically the App / page root). FALSE for child components
+                    that receive data via props. CRITICAL: a component with owns_state=false MUST NOT
+                    introduce useState/useReducer for data already passed via props.
+   • "consumed_by" — (components only) array of paths of OTHER plan files that render this component.
+                     Helps the coder agent know who calls them and with what props.
 
 2. DEPENDENCY CHAIN AWARENESS
    • Import chains MUST be acyclic — no circular imports.
@@ -115,11 +127,24 @@ OUTPUT JSON SCHEMA
 {
   "files": [
     {
+      "path": "src/App.jsx",
+      "purpose": "Root component — owns task state and composes Header, TaskInput, TaskStats, TaskList.",
+      "exports": ["App"],
+      "imports": ["src/components/Header.jsx", "src/components/TaskList.jsx"],
+      "props": [],
+      "owns_state": true,
+      "consumed_by": ["src/main.jsx"]
+    },
+    {
       "path": "src/components/Header.jsx",
-      "purpose": "Site header with logo, navigation links to Features/Pricing/Contact sections, and a CTA button.",
+      "purpose": "Site header with logo, navigation links and a CTA button.",
       "exports": ["Header"],
       "imports": ["src/components/Button.jsx"],
-      "props": ["onCtaClick"]
+      "props": [
+        { "name": "onCtaClick", "type": "() => void", "required": true, "description": "callback when CTA button is clicked" }
+      ],
+      "owns_state": false,
+      "consumed_by": ["src/App.jsx"]
     }
   ],
   "techStack": ["react", "tailwindcss", "vite"],

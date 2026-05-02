@@ -6,10 +6,13 @@ import {
     reorderPlanFiles,
 } from './dependencyGraph.js';
 
+// Tightened to match the frontend UI labels (simple "3-5 files", standard "5-10",
+// advanced "8-20"). Bounds include a small upper-tolerance so a slightly-over-
+// budget plan still passes — but generations don't sprawl beyond what the UI promised.
 const FILE_COUNT_BOUNDS = {
-    simple: [3, 12],
-    intermediate: [5, 22],
-    advanced: [8, 40],
+    simple: [3, 7],
+    intermediate: [5, 12],
+    advanced: [8, 22],
 };
 
 const FRAMEWORK_ENTRY_POINTS = {

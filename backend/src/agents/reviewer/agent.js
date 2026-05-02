@@ -1,6 +1,8 @@
 import logger from '../../services/logger.js';
 import { createError, classifyIssues, attributeRootCauses } from '../shared/errors.js';
 import { collectBundlerTransformErrors } from '../../services/bundler.js';
+import { checkPropInterfaces } from '../../services/propInterfaceCheck.js';
+import { checkCrossFileConsistency } from '../../services/crossFileConsistency.js';
 
 /**
  * Reviewer Agent — validates project-level consistency with multiple passes.
@@ -41,6 +43,17 @@ export class ReviewerAgent {
         // Pass 4: Preview bundler dry-run (JSX/TSX Babel transform — same as Live Preview)
         const bundleIssues = this._bundlerDryRunIssues(memory, framework);
         allIssues.push(...bundleIssues);
+
+        // Pass 5: Prop-interface consistency between parent JSX call sites and child Props interfaces.
+        // Catches the class of bug where parent passes <X stats={s}/> but X declares { tasks }.
+        const propIssues = this._checkPropInterfaces(memory);
+        allIssues.push(...propIssues);
+
+        // Pass 6: Cross-file consistency for HTML/CSS/JS projects (vanilla-js).
+        // Catches: HTML classes not defined in CSS, JS DOM targets not in HTML,
+        // localStorage key drift, Tailwind classes used without config.
+        const crossFileIssues = this._checkCrossFileConsistency(memory);
+        allIssues.push(...crossFileIssues);
 
         // Classify issues
         const classified = classifyIssues(allIssues);
@@ -340,6 +353,80 @@ export class ReviewerAgent {
             }
         }
 
+        return issues;
+    }
+
+    /**
+     * Pass 6: Cross-file HTML/CSS/JS consistency. Sister to prop-interface check.
+     */
+    _checkCrossFileConsistency(memory) {
+        const issues = [];
+        if (!memory) return issues;
+        const files = memory.getGeneratedFiles();
+        if (Object.keys(files).length === 0) return issues;
+
+        try {
+            const { issues: cfIssues } = checkCrossFileConsistency(files);
+            for (const c of cfIssues) {
+                issues.push(createError('IMPORT_BROKEN', {
+                    phase: 'review',
+                    agent: 'reviewer',
+                    file: c.file,
+                    message: c.message,
+                    severity: c.severity,
+                    crossFile: {
+                        subtype: c.subtype,
+                        details: c.details,
+                    },
+                }));
+            }
+            if (cfIssues.length > 0) {
+                logger.info('[ReviewerAgent] Cross-file consistency check found issues', {
+                    count: cfIssues.length,
+                    subtypes: [...new Set(cfIssues.map(i => i.subtype))],
+                });
+            }
+        } catch (err) {
+            logger.warn('[ReviewerAgent] Cross-file consistency check threw', { error: err.message });
+        }
+        return issues;
+    }
+
+    /**
+     * Pass 5: Detect prop-interface mismatches between parent call sites and child interfaces.
+     */
+    _checkPropInterfaces(memory) {
+        const issues = [];
+        if (!memory) return issues;
+        const files = memory.getGeneratedFiles();
+        if (Object.keys(files).length === 0) return issues;
+
+        try {
+            const { issues: propIssues } = checkPropInterfaces(files);
+            for (const p of propIssues) {
+                issues.push(createError('IMPORT_BROKEN', {
+                    phase: 'review',
+                    agent: 'reviewer',
+                    file: p.file,
+                    message: p.message,
+                    severity: p.severity,
+                    propMismatch: {
+                        subtype: p.subtype,
+                        component: p.component,
+                        details: p.details,
+                    },
+                    // Hint to the fixer: if it's an extra prop on the parent's JSX, the fix
+                    // typically belongs in the *child* (add the prop to its interface) rather
+                    // than the parent — the parent's intent is what the user sees rendered.
+                    suggestion: p.subtype === 'EXTRA_PROP' ? 'add_export' : null,
+                }));
+            }
+            if (propIssues.length > 0) {
+                logger.info('[ReviewerAgent] Prop-interface check found mismatches', { count: propIssues.length });
+            }
+        } catch (err) {
+            logger.warn('[ReviewerAgent] Prop-interface check threw', { error: err.message });
+        }
         return issues;
     }
 

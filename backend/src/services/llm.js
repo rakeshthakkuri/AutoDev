@@ -75,12 +75,23 @@ Framework: {framework}
 Styling: {stylingFramework}
 Complexity: {complexity}
 
-REQUIRED JSON STRUCTURE:
+REQUIRED JSON STRUCTURE — every component file (.jsx/.tsx/.vue/.svelte) MUST include
+"props", "owns_state", and "consumed_by" so the coder agent can enforce a consistent
+prop-interface contract across files. Non-component files may omit these.
+
 {
   "files": [
     {
       "path": "path/to/file.ext",
-      "purpose": "What this file does"
+      "purpose": "What this file does",
+      "exports": ["SymbolNamesExportedByThisFile"],
+      "imports": ["src/path/to/another/local/file.tsx"],
+      "props": [
+        { "name": "tasks", "type": "Task[]", "required": true, "description": "list of tasks to render" },
+        { "name": "onToggle", "type": "(id: string) => void", "required": true, "description": "called when a task is toggled" }
+      ],
+      "owns_state": false,
+      "consumed_by": ["src/App.tsx"]
     }
   ],
   "techStack": ["List of technologies"],
@@ -119,8 +130,12 @@ REQUIRED JSON STRUCTURE:
   }
 }
 
-FRAMEWORK-SPECIFIC FILE STRUCTURES:
-- vanilla-js: index.html, styles.css, script.js (MUST link them in index.html)
+FRAMEWORK-SPECIFIC FILE STRUCTURES (MANDATORY — exact paths, NO subfolders, NO splitting):
+- vanilla-js: EXACTLY these three files at the project root, no more, no less:
+    1. "index.html"   — must link <link rel="stylesheet" href="styles.css"> and <script defer src="script.js"></script>
+    2. "styles.css"   — ONE CSS file containing reset + tokens (:root) + all rules. Do NOT split into multiple CSS files.
+    3. "script.js"    — ONE JS file containing all logic. Do NOT split into multiple JS files.
+  Never use "css/" or "js/" subfolders. Never create variables.css, reset.css, app.js, dom.js, etc.
 - react: index.html, src/App.jsx, src/main.jsx, src/index.css (index.html MUST have #root and link to main.jsx)
 - react-ts: index.html, src/App.tsx, src/main.tsx, src/index.css (index.html MUST have #root and link to main.tsx)
 - nextjs: app/layout.tsx, app/page.tsx, app/globals.css
@@ -134,7 +149,24 @@ RULES:
 - Ensure all files have a clear purpose.
 - For landing-page projects, include a structure that supports sectioned storytelling and conversion.
 - Ensure designSystem values are token-ready (color, type, spacing, radius, shadow, motion), not only a single brand color.
-- Output ONLY the JSON object.`;
+
+PROP-INTERFACE CONTRACT (CRITICAL — prevents broken-UI bugs):
+- For component files, "props" MUST be an array of typed prop descriptors:
+    [{ "name": string, "type": string, "required": boolean, "description": string }]
+  Use [] for stateless components with no inputs.
+- "owns_state" MUST be set on every component file:
+    true  → this component manages its own React state (typically App / page root only).
+    false → this component receives data via props; it MUST NOT introduce useState/useReducer
+            for data passed as props.
+- For each parent–child pair, the parent's JSX call site MUST pass exactly the props the child declares.
+  If parent renders <TaskList tasks={t} onToggle={fn} onDelete={fn}/>, the child's "props" array
+  MUST list tasks, onToggle, onDelete with matching types — NOT some other names like "onTasksChange".
+
+LOCKFILES / BUILD ARTIFACTS — never plan these:
+- package-lock.json, yarn.lock, pnpm-lock.yaml — package managers create these
+- node_modules/, dist/, build/, .next/, .vscode/, .idea/, .github/
+
+Output ONLY the JSON object.`;
 
 // ─── Framework-Specific Code Generator Prompts ──────────────────────────────
 const FRAMEWORK_PROMPTS = {
@@ -309,14 +341,16 @@ TAILWIND CSS INSTRUCTIONS:
 CSS INSTRUCTIONS:
 - Output ONLY the raw code. No markdown fences.
 - Use CSS custom properties (variables) for theming (--primary, --bg, etc.).
+- CRITICAL: Define ALL --xxx custom properties in :root AT THE TOP of THIS file before they are used. Every var(--foo) MUST have a matching --foo: value; in :root within the same file. Missing definitions cause the page to render completely unstyled.
 - Use CSS Grid and Flexbox for modern, responsive layouts.
 - Mobile-first approach with media queries.
-- Smooth transitions: transition: all 0.3s ease-in-out;.
+- Smooth transitions: transition: all 0.3s ease-in-out;
 - Include a CSS reset (box-sizing: border-box; margin: 0; padding: 0;).
-- Define design tokens for color, typography, spacing, radius, shadow, and motion in :root.
+- Define design tokens for color, typography, spacing, radius, shadow, and motion in :root — all in this single file.
 - Use token values consistently; avoid arbitrary one-off values unless justified.
 - Include :focus-visible states for interactive elements.
-- For landing-page output, enforce section rhythm and strong visual hierarchy.`,
+- For landing-page output, enforce section rhythm and strong visual hierarchy.
+- For vanilla-js projects: keep ALL styles in one styles.css. Do NOT split into variables.css, reset.css, etc.`,
 
     'css-modules': `
 CSS MODULES INSTRUCTIONS:

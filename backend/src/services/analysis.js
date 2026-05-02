@@ -1037,11 +1037,25 @@ export class AnalysisService {
         const framework = requirements.framework || config.defaultFramework;
         const stylingFramework = this._coerceStylingFramework(framework, requirements.stylingFramework || 'plain-css');
 
-        let files = result.files.map(f =>
-            typeof f === 'string'
-                ? { path: f, purpose: '' }
-                : { path: f.path || f.name, purpose: f.purpose || '' }
-        );
+        // Preserve typed planner metadata (props, owns_state, consumed_by, exports, imports)
+        // so the coder agent can use them for prop-interface contract enforcement.
+        let files = result.files.map(f => {
+            if (typeof f === 'string') return { path: f, purpose: '' };
+            const out = { path: f.path || f.name, purpose: f.purpose || '' };
+            if (Array.isArray(f.exports)) out.exports = f.exports;
+            if (Array.isArray(f.imports)) out.imports = f.imports;
+            if (Array.isArray(f.props)) {
+                // Normalise to typed-object shape; tolerate the legacy string-array shape.
+                out.props = f.props.map(p =>
+                    typeof p === 'string'
+                        ? { name: p, type: 'unknown', required: true, description: '' }
+                        : { name: p.name, type: p.type || 'unknown', required: p.required !== false, description: p.description || '' }
+                ).filter(p => p.name);
+            }
+            if (typeof f.owns_state === 'boolean') out.owns_state = f.owns_state;
+            if (Array.isArray(f.consumed_by)) out.consumed_by = f.consumed_by;
+            return out;
+        });
 
         // Drop files the system manages itself (lockfiles, build artifacts, IDE/CI infra).
         // Generating these via LLM is a recipe for fallback churn — they're either
@@ -1073,6 +1087,35 @@ export class AnalysisService {
 
         // Ensure entry points exist based on framework
         files = this._ensureEntryPoints(files, framework);
+
+        // Hard-collapse for vanilla-js: enforce exactly index.html + styles.css + script.js,
+        // no subfolders, no split CSS/JS files. The LLM frequently mis-splits these (e.g.
+        // creates css/variables.css that contains a reset, leaving styles.css references
+        // to var(--xxx) undefined).
+        if (framework === config.defaultFramework) {
+            const collapsed = [];
+            const seen = new Set();
+            const collapsedOut = [];
+            for (const f of files) {
+                const p = f.path;
+                let canonical = null;
+                if (/(^|\/)index\.html$/.test(p)) canonical = 'index.html';
+                else if (/\.(css|scss)$/i.test(p)) canonical = 'styles.css';
+                else if (/\.(js|mjs|cjs)$/i.test(p)) canonical = 'script.js';
+                else { collapsed.push(f); continue; }
+
+                if (seen.has(canonical)) {
+                    collapsedOut.push({ from: p, to: canonical });
+                    continue;
+                }
+                seen.add(canonical);
+                collapsed.push({ ...f, path: canonical });
+            }
+            if (collapsedOut.length > 0) {
+                logger.info('Collapsed split vanilla-js files', { collapsedOut });
+            }
+            files = collapsed;
+        }
 
         // Add tailwind files if needed
         if (stylingFramework === 'tailwind') {

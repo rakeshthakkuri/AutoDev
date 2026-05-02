@@ -320,6 +320,69 @@ For every identifier the validator flagged as not defined, either (a) add the co
 `;
         }
 
+        const crossFileHints = errors
+            .map(e => /HTML class .* has no matching CSS|JS in .* references #|JS in .* targets \.|localStorage key drift|Tailwind utility classes/i.test(e) ? e : null)
+            .filter(Boolean);
+        if (crossFileHints.length > 0) {
+            prompt += `
+CROSS-FILE CONSISTENCY REPAIR:
+The validator found mismatches between this file and other files in the project. Apply the changes inside THIS file only — do not edit other files.
+
+For "HTML class \"X\" has no matching CSS rule":
+  → Either add the corresponding rule to the CSS (if you control it), or rename the HTML class to one that exists. The error tells you which file to look at.
+
+For "JS in <file> references #X but no element with id=\"X\" exists":
+  → Either rename the JS getElementById/querySelector target to an id that exists in the HTML, or add the element to the HTML. The error lists available ids.
+
+For "JS targets .X but no element with class=\"X\" exists":
+  → Same as above: rename the JS class target or add the class to the HTML element.
+
+For "localStorage key drift":
+  → Pick ONE canonical key name. Both reads (getItem) and writes (setItem) MUST use the exact same string.
+
+For "Tailwind utility classes ... but no tailwind.config":
+  → Either replace Tailwind classes with vanilla CSS rules, or add tailwind.config.js with content paths.
+
+Output the COMPLETE updated file.
+`;
+        }
+
+        const propMismatchHints = errors
+            .map(e => /prop "\w+" is not declared|missing required prop|Props interface/i.test(e) ? e : null)
+            .filter(Boolean);
+        if (propMismatchHints.length > 0) {
+            prompt += `
+PROP-INTERFACE REPAIR — DECISIVE INSTRUCTIONS:
+The validator found mismatches between this file's JSX call sites and a child component's declared Props interface. Each error tells you the EXACT child file path, what props it declares, and what THIS file is incorrectly passing.
+
+THE CHILD'S INTERFACE IS THE SOURCE OF TRUTH. Edit THIS file to match it. Do NOT request changes to the child.
+
+For each "EXTRA_PROP" error ("<X foo={...}/> in this file: prop \"foo\" is not declared in <child>'s interface (declared: a, b)"):
+  → Read the child's interface in OTHER PROJECT FILES below.
+  → Rename or restructure the call site to use the declared names.
+  → If you were passing a single OBJECT but the child wants individual SCALAR props (e.g. you pass <Stats stats={s}/> but child declares { total, completed }):
+       Replace with <Stats total={s.total} completed={s.completed} />
+  → If you were passing a callback under the wrong name (e.g. onAddTask vs onAdd):
+       Just rename the JSX attribute. Same callback function — different attribute name.
+
+For each "MISSING_REQUIRED" error ("<X/> is missing required prop \"foo\""):
+  → Add the missing prop to the JSX call site, sourced from the appropriate state/value in this file.
+  → If a missing prop is paired with an EXTRA_PROP error referring to a related field, the fix is the rename/restructure described above (you'll resolve both together).
+
+WORKED EXAMPLE:
+  Errors say:
+    - <TaskStats stats={...}/>: prop "stats" is not declared (declared: total, completed)
+    - <TaskStats/> is missing required prop "total"
+    - <TaskStats/> is missing required prop "completed"
+  Current code:
+    <TaskStats stats={stats} />
+  Correct fix:
+    <TaskStats total={stats.total} completed={stats.completed} />
+
+After the fix, the call site MUST use ONLY the prop names declared in the child's interface. Do not add comments about the change.
+`;
+        }
+
         if (warnings && warnings.length > 0) {
             prompt += `\nWARNINGS (fix if possible):
 ${warnings.map((w, i) => `${i + 1}. ${w}`).join('\n')}
@@ -337,18 +400,38 @@ ${warnings.map((w, i) => `${i + 1}. ${w}`).join('\n')}
 
         prompt += `\nCURRENT CODE:\n\`\`\`\n${code}\n\`\`\`\n`;
 
-        // Add context of other files for import resolution
+        // Add context of other files for import resolution.
+        // For prop-mismatch errors, prioritise the *specific* child files referenced
+        // in the errors so the LLM sees their interfaces in full.
         if (contextFiles && Object.keys(contextFiles).length > 0) {
             const excludePaths = new Set([filePath, ...(importingFiles || []).map(f => f.path)]);
-            const contextEntries = Object.entries(contextFiles)
-                .filter(([p]) => !excludePaths.has(p))
-                .slice(0, 6); // Limit context to 6 files
+            const referenced = new Set();
+            const refRe = /declared in (\S+?)(?:'s|\)|\.|$)/g;
+            for (const e of errors) {
+                if (typeof e !== 'string') continue;
+                let m;
+                while ((m = refRe.exec(e)) !== null) {
+                    const ref = m[1].replace(/[.,;:]+$/, '');
+                    if (contextFiles[ref] && !excludePaths.has(ref)) referenced.add(ref);
+                }
+            }
+
+            // Referenced files first (full content), then up to 4 other files (truncated).
+            const contextEntries = [];
+            for (const ref of referenced) contextEntries.push([ref, contextFiles[ref], 'full']);
+            for (const [p, content] of Object.entries(contextFiles)) {
+                if (excludePaths.has(p) || referenced.has(p)) continue;
+                if (contextEntries.length >= 6) break;
+                contextEntries.push([p, content, 'truncated']);
+            }
 
             if (contextEntries.length > 0) {
-                prompt += `\nOTHER PROJECT FILES (for import/reference resolution):\n`;
-                for (const [p, content] of contextEntries) {
-                    const truncated = (content || '').substring(0, 800);
-                    prompt += `--- ${p} ---\n${truncated}\n${content && content.length > 800 ? '// ... truncated\n' : ''}\n`;
+                prompt += `\nOTHER PROJECT FILES (for import/reference resolution — files cited in errors are shown in full):\n`;
+                for (const [p, content, mode] of contextEntries) {
+                    const limit = mode === 'full' ? 4000 : 800;
+                    const text = (content || '').substring(0, limit);
+                    const truncated = content && content.length > limit ? '\n// ... truncated\n' : '';
+                    prompt += `--- ${p} ---\n${text}${truncated}\n`;
                 }
             }
         }

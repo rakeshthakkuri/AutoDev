@@ -246,6 +246,17 @@ export class CodeValidator {
 
         if (code.trim().length === 0) warnings.push('CSS file is empty');
 
+        // Auto-fix: orphaned var(--xxx) references (used without :root definition).
+        // The LLM frequently writes color: var(--color-text); without ever defining
+        // --color-text in :root, which renders the entire page completely unstyled.
+        // We detect missing custom properties and inject a sensible :root block at
+        // the top of the file.
+        const injected = injectMissingCssVars(fixedCode);
+        if (injected !== fixedCode) {
+            fixedCode = injected;
+            warnings.push('Auto-injected :root block for orphaned CSS custom-property references');
+        }
+
         return { isValid: errors.length === 0, errors, warnings, fixedCode: fixedCode !== code ? fixedCode : null };
     }
 
@@ -1202,4 +1213,112 @@ export class CodeValidator {
             },
         };
     }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Detect var(--foo) references that have no matching --foo: definition
+ * anywhere in the file. Inject a :root block with sensible defaults so the
+ * page renders correctly. This is a deterministic safety net for the common
+ * LLM mistake of using design tokens without defining them.
+ *
+ * @param {string} css
+ * @returns {string} possibly-augmented CSS (returns original if nothing to do)
+ */
+function injectMissingCssVars(css) {
+    if (typeof css !== 'string' || css.length === 0) return css;
+    if (!/var\s*\(\s*--/.test(css)) return css;
+
+    // Collect referenced custom properties
+    const referenced = new Set();
+    const refRe = /var\s*\(\s*(--[a-zA-Z][\w-]*)/g;
+    let m;
+    while ((m = refRe.exec(css)) !== null) referenced.add(m[1]);
+
+    // Collect defined custom properties (anywhere — :root, .foo, etc.)
+    const defined = new Set();
+    const defRe = /(--[a-zA-Z][\w-]*)\s*:/g;
+    while ((m = defRe.exec(css)) !== null) defined.add(m[1]);
+
+    const missing = [...referenced].filter(v => !defined.has(v));
+    if (missing.length === 0) return css;
+
+    const declarations = missing.map(name => {
+        const value = guessCssVarDefault(name);
+        return `  ${name}: ${value};`;
+    });
+
+    const block = `:root {\n${declarations.join('\n')}\n}\n\n`;
+    return block + css;
+}
+
+/**
+ * Best-effort sensible default for a custom property name. Pattern-matches the
+ * name to guess what kind of value it expects (color, size, font, etc).
+ */
+function guessCssVarDefault(name) {
+    const n = name.toLowerCase();
+
+    // Colors
+    if (/(^|-)bg($|-)|background/.test(n)) return '#ffffff';
+    if (/(^|-)surface($|-)/.test(n)) return '#f8fafc';
+    if (/border/.test(n)) return '#e2e8f0';
+    if (/(^|-)muted/.test(n)) return '#64748b';
+    if (/text/.test(n)) return '#0f172a';
+    if (/error|danger/.test(n)) return '#ef4444';
+    if (/success/.test(n)) return '#22c55e';
+    if (/warning/.test(n)) return '#f59e0b';
+    if (/(^|-)accent($|-)/.test(n)) return '#f59e0b';
+    if (/primary|brand/.test(n)) return '#2563eb';
+    if (/secondary/.test(n)) return '#0ea5e9';
+    if (/color|hue/.test(n)) return '#0f172a';
+
+    // Typography
+    if (/font-family|font$|family/.test(n)) return "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    if (/heading-font|display-font/.test(n)) return "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+    if (/font-size-display|text-display/.test(n)) return '3rem';
+    if (/font-size-h1|text-h1/.test(n)) return '2rem';
+    if (/font-size-h2|text-h2/.test(n)) return '1.5rem';
+    if (/font-size-h3|text-h3/.test(n)) return '1.25rem';
+    if (/font-size-body|text-body|font-size$/.test(n)) return '1rem';
+    if (/font-size-small|text-small/.test(n)) return '0.875rem';
+    if (/font-size-caption|text-caption/.test(n)) return '0.75rem';
+    if (/font-weight/.test(n)) return '500';
+    if (/line-height/.test(n)) return '1.5';
+
+    // Spacing / sizing
+    if (/spacing-xs|space-xs|gap-xs/.test(n)) return '4px';
+    if (/spacing-sm|space-sm|gap-sm/.test(n)) return '8px';
+    if (/spacing-md|space-md|gap-md|spacing$/.test(n)) return '16px';
+    if (/spacing-lg|space-lg|gap-lg/.test(n)) return '24px';
+    if (/spacing-xl|space-xl|gap-xl/.test(n)) return '32px';
+    if (/spacing-2xl|space-2xl/.test(n)) return '48px';
+    if (/spacing|space|gap|padding|margin/.test(n)) return '16px';
+
+    // Radius
+    if (/radius-sm|rounded-sm/.test(n)) return '4px';
+    if (/radius-md|rounded-md|radius$/.test(n)) return '8px';
+    if (/radius-lg|rounded-lg/.test(n)) return '12px';
+    if (/radius-full|rounded-full/.test(n)) return '9999px';
+    if (/radius|rounded/.test(n)) return '8px';
+
+    // Shadow
+    if (/shadow-sm/.test(n)) return '0 1px 2px rgba(0,0,0,0.05)';
+    if (/shadow-md|shadow$/.test(n)) return '0 4px 6px rgba(0,0,0,0.1)';
+    if (/shadow-lg/.test(n)) return '0 10px 15px rgba(0,0,0,0.1)';
+    if (/shadow/.test(n)) return '0 2px 4px rgba(0,0,0,0.08)';
+
+    // Motion
+    if (/duration-fast/.test(n)) return '120ms';
+    if (/duration-slow/.test(n)) return '320ms';
+    if (/duration/.test(n)) return '200ms';
+    if (/easing|ease/.test(n)) return 'cubic-bezier(0.4, 0, 0.2, 1)';
+    if (/transition/.test(n)) return '200ms cubic-bezier(0.4, 0, 0.2, 1)';
+
+    // Z-index
+    if (/z-/.test(n)) return '10';
+
+    // Sane fallback
+    return 'initial';
 }

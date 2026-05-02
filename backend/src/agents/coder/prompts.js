@@ -68,16 +68,24 @@ HARD RULES — violating any of these is a build-breaking failure:
    - Named exports: {namedExports}
    - Expected imports into this file: {imports}
    - Props/interface this component accepts: {props}
+   - This component owns its own state? {ownsState}
    - If the default export is a React/Vue/Svelte component, it MUST be a function (not a plain object).
    - Do NOT use \`export default {{ A, B }}\` (object literal) — that is an anti-pattern.
    - If this file is an App/Page/root component, read <context> to identify required child props and pass them explicitly; rendering child components without their required props is a build-breaking failure.
 
-4. IMPORTS
+4. PROP-INTERFACE INTEGRITY — these are build-breaking:
+   - Use ONLY the prop names listed in "Props/interface this component accepts" above. Do NOT rename, reshape, or add new ones.
+   - The TypeScript interface (or PropTypes) you declare MUST exactly match those prop names and types — no extras, no misses.
+   - If "This component owns its own state?" is "false", you MUST NOT introduce useState/useReducer for any data that is passed in as a prop. Operate purely on the props.
+   - If a callback prop like onAdd / onToggle / onDelete is in your contract, use it for the corresponding action — do NOT keep a parallel local copy of state and ignore the callback.
+   - <parent_call_site> below shows how a parent renders this component. If the parent passes \`<X foo={bar} />\` then \`foo\` is non-negotiable in your prop interface — match it exactly.
+
+5. IMPORTS
    - Only import from files that exist in the project (see <context> below).
    - Import paths must match exactly — no guessing file extensions or directory structures.
    - Do NOT import packages that are not in the project's dependencies unless they are framework built-ins.
 
-5. TOKEN BUDGET
+6. TOKEN BUDGET
    - Target output size: ~{tokenBudget} tokens.
    - If the file is a config or utility, keep it concise.
    - If the file is a page or complex component, use the full budget to deliver polished, detailed output.
@@ -108,6 +116,10 @@ FORBIDDEN — do not generate any of the following:
 <context>
 {context}
 </context>
+
+<parent_call_site>
+{parentCallSite}
+</parent_call_site>
 
 <design_system>
 {designSystem}

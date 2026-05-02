@@ -166,7 +166,24 @@ export class CoderAgent {
             || 'The main component or value of this file';
         const namedExports = (fileContracts.namedExports || []).join(', ') || 'none required';
         const imports = (fileContracts.imports || []).join(', ') || 'infer from context';
-        const props = fileContracts.props || 'infer from component purpose';
+
+        // --- Resolve plan metadata for this file (typed props, owns_state, consumed_by) ---
+        const planFile = (plan?.files || []).find(f => (f.path || f) === filePath) || {};
+        const typedProps = Array.isArray(planFile.props) && planFile.props.length > 0
+            ? planFile.props
+            : (Array.isArray(fileContracts.props) ? fileContracts.props : []);
+        const props = formatTypedProps(typedProps) || (typeof fileContracts.props === 'string' ? fileContracts.props : 'infer from component purpose');
+        const ownsStateExplicit = typeof planFile.owns_state === 'boolean' ? planFile.owns_state : null;
+        const ownsState = ownsStateExplicit === null
+            ? (this._isLikelyRoot(filePath) ? 'true (root component — manage state here)' : 'false (child component — state lives in parent; use props only)')
+            : (ownsStateExplicit ? 'true (this component manages its own state)' : 'false (state lives in a parent — use props only, no useState for prop data)');
+
+        // --- Find parent call site(s) so the LLM can match the actual prop names being passed ---
+        const consumers = Array.isArray(planFile.consumed_by) && planFile.consumed_by.length > 0
+            ? planFile.consumed_by
+            : this._inferConsumers(filePath, plan, generatedFiles);
+        const parentCallSite = this._extractParentCallSites(filePath, consumers, generatedFiles)
+            || 'No parent call site available yet (this file may be the root, or its parent has not been generated yet). Match the props contract above exactly.';
 
         // --- Build context section ---
         let context = '';
@@ -208,13 +225,87 @@ export class CoderAgent {
             .replace(/{namedExports}/g, namedExports)
             .replace(/{imports}/g, imports)
             .replace(/{props}/g, props)
+            .replace(/{ownsState}/g, ownsState)
             .replace(/{tokenBudget}/g, String(tokenBudget))
             .replace(/{frameworkRules}/g, frameworkRules)
             .replace(/{stylingRules}/g, stylingRules)
             .replace(/{context}/g, context)
+            .replace(/{parentCallSite}/g, parentCallSite)
             .replace(/{designSystem}/g, designSystem);
 
         return prompt;
+    }
+
+    // ─── Helpers used by buildPromptV2 ──────────────────────────────────────
+
+    /**
+     * Heuristic: is this file likely the App / page root that owns state?
+     */
+    _isLikelyRoot(filePath) {
+        const lower = filePath.toLowerCase();
+        return /(^|\/)app\.(jsx|tsx|vue|svelte)$/.test(lower)
+            || /(^|\/)(page|index)\.(jsx|tsx)$/.test(lower)
+            || /(^|\/)main\.(jsx|tsx|js|ts)$/.test(lower);
+    }
+
+    /**
+     * If the plan didn't set consumed_by, infer parents by scanning generated files
+     * (or other plan files' imports) for an import that resolves to filePath.
+     */
+    _inferConsumers(filePath, plan, generatedFiles) {
+        const consumers = new Set();
+        const baseName = filePath.split('/').pop()?.replace(/\.\w+$/, '') || '';
+        if (!baseName) return [];
+        const importRe = new RegExp(`from\\s+['"][^'"]*${baseName.replace(/[.*+?^${}()|[\\\]]/g, '\\$&')}(['"])`);
+
+        // Prefer generated content (more precise)
+        for (const [p, content] of Object.entries(generatedFiles || {})) {
+            if (p === filePath) continue;
+            if (typeof content === 'string' && importRe.test(content)) consumers.add(p);
+        }
+        // Fall back to plan declarations
+        for (const f of (plan?.files || [])) {
+            if (!f || f.path === filePath) continue;
+            if (Array.isArray(f.imports) && f.imports.some(i => i === filePath || i.endsWith('/' + filePath))) {
+                consumers.add(f.path);
+            }
+        }
+        return [...consumers];
+    }
+
+    /**
+     * Extract the JSX call sites where this component is rendered, from already-generated parent files.
+     * Returns a short snippet showing exactly which props the parent is passing.
+     */
+    _extractParentCallSites(filePath, consumers, generatedFiles) {
+        if (!consumers || consumers.length === 0) return null;
+        const baseName = filePath.split('/').pop()?.replace(/\.\w+$/, '') || '';
+        if (!baseName) return null;
+
+        // PascalCase the basename for component matching
+        const componentName = baseName
+            .replace(/[-_](.)/g, (_, c) => c.toUpperCase())
+            .replace(/^(.)/, (_, c) => c.toUpperCase());
+
+        const sites = [];
+        for (const parentPath of consumers) {
+            const content = generatedFiles?.[parentPath];
+            if (typeof content !== 'string') continue;
+
+            // Find the component import alias (parents may rename: `import Stats from './TaskStats'`)
+            const importRe = new RegExp(`import\\s+([A-Za-z_$][\\w$]*)\\s*(?:,\\s*\\{[^}]*\\})?\\s+from\\s+['"][^'"]*${baseName.replace(/[.*+?^${}()|[\\\]]/g, '\\$&')}['"]`);
+            const importMatch = content.match(importRe);
+            const localName = importMatch ? importMatch[1] : componentName;
+
+            // Find JSX usages: <LocalName ...props> (self-closing or with children)
+            const jsxRe = new RegExp(`<${localName}\\b[^>]*?(?:/>|>)`, 'g');
+            const matches = content.match(jsxRe) || [];
+            for (const m of matches.slice(0, 3)) {
+                sites.push(`// in ${parentPath}\n${m}`);
+            }
+        }
+        if (sites.length === 0) return null;
+        return sites.join('\n\n');
     }
 
     /**
@@ -233,6 +324,24 @@ export class CoderAgent {
             .replace(/^(.)/, (_, c) => c.toUpperCase());
         return `${pascal} (as a ${framework.includes('react') ? 'React functional component' : 'component function'})`;
     }
+}
+
+// ─── Helper: format typed props for the coder prompt ───────────────────────
+
+/**
+ * Render the planner's typed props as a readable contract block. Falls back to
+ * a stringified shape if shape is unexpected.
+ */
+function formatTypedProps(props) {
+    if (!Array.isArray(props) || props.length === 0) return null;
+    const lines = props.map(p => {
+        if (typeof p === 'string') return `  - ${p}: unknown (required)`;
+        if (!p || typeof p !== 'object' || !p.name) return null;
+        const required = p.required === false ? 'optional' : 'required';
+        const desc = p.description ? ` — ${p.description}` : '';
+        return `  - ${p.name}: ${p.type || 'unknown'} (${required})${desc}`;
+    }).filter(Boolean);
+    return lines.length > 0 ? lines.join('\n') : null;
 }
 
 // ─── V2 Framework-Specific Rules ────────────────────────────────────────────
@@ -319,12 +428,14 @@ const STYLING_RULES_V2 = {
 - Reference design system colors via Tailwind config, not hardcoded hex.`,
 
     'plain-css': `
-- Define design tokens as CSS custom properties in :root (colors, spacing, radii, shadows, motion).
+- Define design tokens as CSS custom properties in :root AT THE TOP of the same file where they are used (colors, spacing, radii, shadows, motion).
+- CRITICAL: Every var(--foo) reference MUST have a matching --foo definition in :root in this same file. If you use var(--font-family), --font-family MUST be defined in :root. Otherwise the page renders unstyled.
 - Use token values consistently — no arbitrary one-off values.
 - CSS Grid + Flexbox for layout; mobile-first with min-width media queries.
 - Include a minimal reset (box-sizing: border-box, margin: 0, padding: 0).
-- Transitions: use design system motion tokens (e.g., var(--duration-normal)).
-- Include :focus-visible styles for all interactive elements.`,
+- Transitions: use design system motion tokens (e.g., var(--duration-normal)) — and define those tokens in :root.
+- Include :focus-visible styles for all interactive elements.
+- Do NOT split CSS into multiple files (no separate variables.css, reset.css, etc.) — keep everything in the single styles.css.`,
 
     'css-modules': `
 - File names MUST use .module.css suffix: {ComponentName}.module.css.
